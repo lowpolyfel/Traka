@@ -1,62 +1,78 @@
-﻿using MySql.Data.MySqlClient;
-using System.Security.Claims;
-using Microsoft.AspNetCore.Authentication.Cookies;
+﻿using System.Security.Claims;
 using Microsoft.AspNetCore.Identity;
+using MySql.Data.MySqlClient;
 
 namespace Trackii.Services;
 
 public class AuthService
 {
-    private readonly string _connectionString;
+    private readonly string _conn;
     private readonly PasswordHasher<string> _hasher = new();
 
-    public AuthService(IConfiguration configuration)
+    public AuthService(IConfiguration cfg)
     {
-        _connectionString = configuration.GetConnectionString("TrackiiDb")
-            ?? throw new Exception("Connection string TrackiiDb not found");
+        _conn = cfg.GetConnectionString("TrackiiDb")
+            ?? throw new Exception("Connection string TrackiiDb no configurada");
     }
 
     public ClaimsPrincipal? Login(string username, string passwordPlain)
     {
-        using var cn = new MySqlConnection(_connectionString);
+        using var cn = new MySqlConnection(_conn);
         cn.Open();
 
         using var cmd = new MySqlCommand(@"
-            SELECT u.username, u.password, r.name AS role
-            FROM user u
-            JOIN role r ON r.id = u.role_id
-            WHERE u.username = @u
-              AND u.active = 1
-        ", cn);
+            SELECT u.id, u.username, u.password, u.active, r.name AS role
+            FROM `user` u
+            JOIN `role` r ON r.id = u.role_id
+            WHERE u.username=@u
+            LIMIT 1", cn);
 
         cmd.Parameters.AddWithValue("@u", username);
 
         using var rd = cmd.ExecuteReader();
-        if (!rd.Read())
+        if (!rd.Read()) return null;
+
+        var active = rd.GetBoolean("active");
+        if (!active) return null;
+
+        var dbUsername = rd.GetString("username");
+        var dbHash = rd.GetString("password");
+        var role = rd.GetString("role");
+
+        PasswordVerificationResult verify;
+
+        try
+        {
+            verify = _hasher.VerifyHashedPassword(dbUsername, dbHash, passwordPlain);
+        }
+        catch (FormatException)
+        {
+            // Hash inválido (bcrypt/plain/truncado). No tumbes el sistema.
             return null;
-
-        var storedHash = rd.GetString("password");
-
-        var verify = _hasher.VerifyHashedPassword(
-            username,
-            storedHash,
-            passwordPlain
-        );
+        }
 
         if (verify == PasswordVerificationResult.Failed)
             return null;
 
+        // (Opcional) si Identity recomienda rehash, actualiza
+        if (verify == PasswordVerificationResult.SuccessRehashNeeded)
+        {
+            var newHash = _hasher.HashPassword(dbUsername, passwordPlain);
+
+            rd.Close(); // cerrar reader antes de actualizar
+            using var up = new MySqlCommand("UPDATE `user` SET password=@p WHERE username=@u", cn);
+            up.Parameters.AddWithValue("@p", newHash);
+            up.Parameters.AddWithValue("@u", dbUsername);
+            up.ExecuteNonQuery();
+        }
+
         var claims = new List<Claim>
         {
-            new Claim(ClaimTypes.Name, rd.GetString("username")),
-            new Claim(ClaimTypes.Role, rd.GetString("role"))
+            new Claim(ClaimTypes.Name, dbUsername),
+            new Claim(ClaimTypes.Role, role)
         };
 
-        var identity = new ClaimsIdentity(
-            claims,
-            CookieAuthenticationDefaults.AuthenticationScheme
-        );
-
+        var identity = new ClaimsIdentity(claims, "Cookies");
         return new ClaimsPrincipal(identity);
     }
 }

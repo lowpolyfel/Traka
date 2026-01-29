@@ -1,135 +1,263 @@
-﻿using MySql.Data.MySqlClient;
-using BCrypt.Net;
+﻿using Microsoft.AspNetCore.Identity;
+using MySql.Data.MySqlClient;
 using Trackii.Models.Admin.User;
 
-namespace Trackii.Services.Admin;
-
-public class UserService
+namespace Trackii.Services.Admin
 {
-    private readonly string _conn;
-
-    public UserService(IConfiguration cfg)
+    // Maneja la tabla `user` (NO ASP.NET Identity).
+    // Hash: Microsoft.AspNetCore.Identity.PasswordHasher<string>
+    public class UserService
     {
-        _conn = cfg.GetConnectionString("TrackiiDb")!;
-    }
+        private readonly string _conn;
+        private readonly PasswordHasher<string> _hasher = new();
 
-    public UserListVm GetPaged(string? search, int page, int pageSize)
-    {
-        var vm = new UserListVm
+        // Política simple (coherente con Identity por defecto)
+        private const int MinLen = 6;
+        private const bool RequireDigit = true;
+        private const bool RequireLower = true;
+        private const bool RequireUpper = true;
+        private const bool RequireNonAlnum = true;
+
+        public UserService(IConfiguration config)
         {
-            Search = search,
-            Page = page
-        };
+            _conn = config.GetConnectionString("TrackiiDb")
+                ?? throw new Exception("Connection string TrackiiDb no configurada");
+        }
 
-        using var cn = new MySqlConnection(_conn);
-        cn.Open();
-
-        var where = " WHERE 1=1 ";
-        if (!string.IsNullOrWhiteSpace(search))
-            where += " AND u.username LIKE @s ";
-
-        using var cmd = new MySqlCommand($@"
-            SELECT u.id, u.username, r.name AS role, u.active
-            FROM user u
-            JOIN role r ON r.id = u.role_id
-            {where}
-            ORDER BY u.username
-            LIMIT @off,@sz", cn);
-
-        if (!string.IsNullOrWhiteSpace(search))
-            cmd.Parameters.AddWithValue("@s", $"%{search}%");
-
-        cmd.Parameters.AddWithValue("@off", (page - 1) * pageSize);
-        cmd.Parameters.AddWithValue("@sz", pageSize);
-
-        using var rd = cmd.ExecuteReader();
-        while (rd.Read())
+        // ================= LIST =================
+        public UserListVm GetPaged(string? search, bool showInactive, int page, int pageSize)
         {
-            vm.Items.Add(new UserListVm.Row
+            if (page < 1) page = 1;
+
+            var vm = new UserListVm
             {
-                Id = rd.GetUInt32("id"),
-                Username = rd.GetString("username"),
-                Role = rd.GetString("role"),
-                Active = rd.GetBoolean("active")
-            });
+                Search = search,
+                ShowInactive = showInactive,
+                Page = page
+            };
+
+            using var cn = new MySqlConnection(_conn);
+            cn.Open();
+
+            var where = "WHERE 1=1 ";
+            if (!showInactive)
+                where += "AND u.active = 1 ";
+            if (!string.IsNullOrWhiteSpace(search))
+                where += "AND u.username LIKE @search ";
+
+            using (var countCmd = new MySqlCommand($@"
+                SELECT COUNT(*)
+                FROM user u
+                {where}", cn))
+            {
+                if (!string.IsNullOrWhiteSpace(search))
+                    countCmd.Parameters.AddWithValue("@search", $"%{search}%");
+
+                var total = Convert.ToInt32(countCmd.ExecuteScalar());
+                vm.TotalPages = Math.Max(1, (int)Math.Ceiling(total / (double)pageSize));
+            }
+
+            if (vm.TotalPages > 0 && vm.Page > vm.TotalPages)
+                vm.Page = vm.TotalPages;
+
+            using (var cmd = new MySqlCommand($@"
+                SELECT u.id, u.username, u.active, r.name
+                FROM user u
+                JOIN role r ON r.id = u.role_id
+                {where}
+                ORDER BY u.username
+                LIMIT @off, @size", cn))
+            {
+                cmd.Parameters.AddWithValue("@off", (vm.Page - 1) * pageSize);
+                cmd.Parameters.AddWithValue("@size", pageSize);
+
+                if (!string.IsNullOrWhiteSpace(search))
+                    cmd.Parameters.AddWithValue("@search", $"%{search}%");
+
+                using var rd = cmd.ExecuteReader();
+                while (rd.Read())
+                {
+                    vm.Rows.Add(new UserRowVm
+                    {
+                        Id = rd.GetUInt32(0),
+                        Username = rd.GetString(1),
+                        Active = rd.GetBoolean(2),
+                        Role = rd.GetString(3)
+                    });
+                }
+            }
+
+            return vm;
         }
-        rd.Close();
 
-        using var cnt = new MySqlCommand($"SELECT COUNT(*) FROM user u {where}", cn);
-        if (!string.IsNullOrWhiteSpace(search))
-            cnt.Parameters.AddWithValue("@s", $"%{search}%");
-
-        var total = Convert.ToInt32(cnt.ExecuteScalar());
-        vm.TotalPages = (int)Math.Ceiling(total / (double)pageSize);
-
-        return vm;
-    }
-
-    public UserEditVm? GetById(uint id)
-    {
-        using var cn = new MySqlConnection(_conn);
-        cn.Open();
-
-        using var cmd = new MySqlCommand(@"
-            SELECT id, username, role_id, active
-            FROM user
-            WHERE id=@id", cn);
-
-        cmd.Parameters.AddWithValue("@id", id);
-
-        using var rd = cmd.ExecuteReader();
-        if (!rd.Read())
-            return null;
-
-        return new UserEditVm
+        // ================= GET BY ID =================
+        public UserEditVm? GetById(uint id)
         {
-            Id = rd.GetUInt32("id"),
-            Username = rd.GetString("username"),
-            RoleId = rd.GetUInt32("role_id"),
-            Active = rd.GetBoolean("active")
-        };
-    }
+            using var cn = new MySqlConnection(_conn);
+            cn.Open();
 
-    public void Update(UserEditVm vm)
-    {
-        using var cn = new MySqlConnection(_conn);
-        cn.Open();
+            using var cmd = new MySqlCommand(@"
+                SELECT id, username, role_id, active
+                FROM user
+                WHERE id = @id", cn);
 
-        using var cmd = new MySqlCommand(@"
-            UPDATE user
-            SET username=@u, role_id=@r, active=@a
-            WHERE id=@id", cn);
+            cmd.Parameters.AddWithValue("@id", id);
 
-        cmd.Parameters.AddWithValue("@u", vm.Username);
-        cmd.Parameters.AddWithValue("@r", vm.RoleId);
-        cmd.Parameters.AddWithValue("@a", vm.Active);
-        cmd.Parameters.AddWithValue("@id", vm.Id);
-        cmd.ExecuteNonQuery();
+            using var rd = cmd.ExecuteReader();
+            if (!rd.Read()) return null;
 
-        if (!string.IsNullOrWhiteSpace(vm.NewPassword))
-        {
-            var hash = BCrypt.Net.BCrypt.HashPassword(vm.NewPassword);
-
-            using var pwd = new MySqlCommand(
-                "UPDATE user SET password=@p WHERE id=@id", cn);
-
-            pwd.Parameters.AddWithValue("@p", hash);
-            pwd.Parameters.AddWithValue("@id", vm.Id);
-            pwd.ExecuteNonQuery();
+            return new UserEditVm
+            {
+                Id = rd.GetUInt32(0),
+                Username = rd.GetString(1),
+                RoleId = rd.GetUInt32(2),
+                Active = rd.GetBoolean(3)
+            };
         }
-    }
 
-    public void Toggle(uint id)
-    {
-        using var cn = new MySqlConnection(_conn);
-        cn.Open();
+        // ================= ROLES =================
+        public List<(uint Id, string Name)> GetRoles()
+        {
+            var list = new List<(uint, string)>();
 
-        using var cmd = new MySqlCommand(@"
-            UPDATE user
-            SET active = NOT active
-            WHERE id=@id", cn);
+            using var cn = new MySqlConnection(_conn);
+            cn.Open();
 
-        cmd.Parameters.AddWithValue("@id", id);
-        cmd.ExecuteNonQuery();
+            using var cmd = new MySqlCommand(
+                "SELECT id, name FROM role ORDER BY name", cn);
+
+            using var rd = cmd.ExecuteReader();
+            while (rd.Read())
+                list.Add((rd.GetUInt32(0), rd.GetString(1)));
+
+            return list;
+        }
+
+        // ================= CREATE =================
+        public async Task<List<string>> CreateAsync(UserCreateVm vm)
+        {
+            vm.Username = (vm.Username ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(vm.Username))
+                return new List<string> { "El username es requerido." };
+
+            var pwdErrors = ValidatePassword(vm.Password);
+            if (pwdErrors.Count > 0)
+                return pwdErrors;
+
+            var hash = _hasher.HashPassword(vm.Username, vm.Password);
+
+            using var cn = new MySqlConnection(_conn);
+            cn.Open();
+
+            try
+            {
+                using var cmd = new MySqlCommand(@"
+                    INSERT INTO user (username, password, role_id, active)
+                    VALUES (@u, @p, @r, 1)", cn);
+
+                cmd.Parameters.AddWithValue("@u", vm.Username);
+                cmd.Parameters.AddWithValue("@p", hash);
+                cmd.Parameters.AddWithValue("@r", vm.RoleId);
+                await cmd.ExecuteNonQueryAsync();
+            }
+            catch (MySqlException ex) when (ex.Number == 1062)
+            {
+                return new List<string> { "Ya existe un usuario con ese username." };
+            }
+
+            return new();
+        }
+
+        // ================= UPDATE =================
+        public async Task<List<string>> UpdateAsync(UserEditVm vm)
+        {
+            vm.Username = (vm.Username ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(vm.Username))
+                return new List<string> { "El username es requerido." };
+
+            string? newHash = null;
+
+            if (!string.IsNullOrWhiteSpace(vm.NewPassword))
+            {
+                var pwdErrors = ValidatePassword(vm.NewPassword);
+                if (pwdErrors.Count > 0)
+                    return pwdErrors;
+
+                newHash = _hasher.HashPassword(vm.Username, vm.NewPassword);
+            }
+
+            using var cn = new MySqlConnection(_conn);
+            cn.Open();
+
+            var sql = @"
+                UPDATE user
+                SET username=@u,
+                    role_id=@r,
+                    active=@a";
+
+            if (newHash != null)
+                sql += ", password=@p";
+
+            sql += " WHERE id=@id";
+
+            try
+            {
+                using var cmd = new MySqlCommand(sql, cn);
+                cmd.Parameters.AddWithValue("@u", vm.Username);
+                cmd.Parameters.AddWithValue("@r", vm.RoleId);
+                cmd.Parameters.AddWithValue("@a", vm.Active);
+                cmd.Parameters.AddWithValue("@id", vm.Id);
+                if (newHash != null)
+                    cmd.Parameters.AddWithValue("@p", newHash);
+
+                await cmd.ExecuteNonQueryAsync();
+            }
+            catch (MySqlException ex) when (ex.Number == 1062)
+            {
+                return new List<string> { "Ya existe un usuario con ese username." };
+            }
+
+            return new();
+        }
+
+        // ================= TOGGLE =================
+        public void Toggle(uint id)
+        {
+            using var cn = new MySqlConnection(_conn);
+            cn.Open();
+
+            using var cmd = new MySqlCommand(
+                "UPDATE user SET active = NOT active WHERE id=@id", cn);
+
+            cmd.Parameters.AddWithValue("@id", id);
+            cmd.ExecuteNonQuery();
+        }
+
+        // ================= PASSWORD RULES =================
+        private static List<string> ValidatePassword(string? password)
+        {
+            var errors = new List<string>();
+            password ??= string.Empty;
+
+            if (password.Length < MinLen)
+                errors.Add($"La contraseña debe tener al menos {MinLen} caracteres.");
+
+            if (RequireDigit && !password.Any(char.IsDigit))
+                errors.Add("La contraseña debe contener al menos un dígito.");
+
+            if (RequireLower && !password.Any(char.IsLower))
+                errors.Add("La contraseña debe contener al menos una minúscula.");
+
+            if (RequireUpper && !password.Any(char.IsUpper))
+                errors.Add("La contraseña debe contener al menos una mayúscula.");
+
+            if (RequireNonAlnum && password.All(char.IsLetterOrDigit))
+                errors.Add("La contraseña debe contener al menos un caracter especial.");
+
+            if (password.Contains(' '))
+                errors.Add("La contraseña no debe contener espacios.");
+
+            return errors;
+        }
     }
 }

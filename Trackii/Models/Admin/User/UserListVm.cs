@@ -1,18 +1,15 @@
-﻿namespace Trackii.Models.Admin.User;
+﻿using System.Collections.Generic;
 
-public class UserListVm
+namespace Trackii.Models.Admin.User
 {
-    public List<Row> Items { get; set; } = new();
-
-    public string? Search { get; set; }
-    public int Page { get; set; }
-    public int TotalPages { get; set; }
-
-    public class Row
+    public class UserListVm
     {
-        public uint Id { get; set; }
-        public string Username { get; set; } = "";
-        public string Role { get; set; } = "";
-        public bool Active { get; set; }
+        public List<UserRowVm> Rows { get; set; } = new();
+
+        public string? Search { get; set; }
+        public bool ShowInactive { get; set; }
+
+        public int Page { get; set; }
+        public int TotalPages { get; set; }
     }
 }

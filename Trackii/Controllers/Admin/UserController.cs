@@ -1,51 +1,106 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Trackii.Services.Admin;
 using Trackii.Models.Admin.User;
+using Trackii.Services.Admin;
 
-namespace Trackii.Controllers.Admin;
-
-[Authorize]
-[Route("Admin/User")]
-public class UserController : Controller
+namespace Trackii.Controllers.Admin
 {
-    private readonly UserService _svc;
-
-    public UserController(UserService svc)
+    [Authorize(Roles = "Admin")]
+    [Route("Admin/User")]
+    public class UserController : Controller
     {
-        _svc = svc;
-    }
+        private readonly UserService _service;
 
-    [HttpGet("")]
-    public IActionResult Index(string? search, int page = 1)
-    {
-        var vm = _svc.GetPaged(search, page, 10);
-        return View(vm);
-    }
+        public UserController(UserService service)
+        {
+            _service = service;
+        }
 
-    [HttpGet("Edit/{id}")]
-    public IActionResult Edit(uint id)
-    {
-        var vm = _svc.GetById(id);
-        if (vm == null) return NotFound();
-        return View(vm);
-    }
-
-    [HttpPost("Edit/{id}")]
-    [ValidateAntiForgeryToken]
-    public IActionResult Edit(uint id, UserEditVm vm)
-    {
-        if (!ModelState.IsValid)
+        [HttpGet("")]
+        public IActionResult Index(string? search, bool showInactive = false, int page = 1)
+        {
+            var vm = _service.GetPaged(search, showInactive, page, 10);
             return View(vm);
+        }
 
-        _svc.Update(vm);
-        return RedirectToAction(nameof(Index));
-    }
+        [HttpGet("Create")]
+        public IActionResult Create()
+        {
+            LoadRoles();
+            return View(new UserCreateVm());
+        }
 
-    [HttpGet("Toggle/{id}")]
-    public IActionResult Toggle(uint id)
-    {
-        _svc.Toggle(id);
-        return RedirectToAction(nameof(Index));
+        [HttpPost("Create")]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Create(UserCreateVm vm)
+        {
+            if (!ModelState.IsValid)
+            {
+                LoadRoles();
+                return View(vm);
+            }
+
+            var errors = await _service.CreateAsync(vm);
+            if (errors.Any())
+            {
+                foreach (var err in errors)
+                    ModelState.AddModelError(nameof(vm.Password), err);
+
+                LoadRoles();
+                return View(vm);
+            }
+
+            return RedirectToAction(nameof(Index));
+        }
+
+        [HttpGet("Edit/{id:long}")]
+        public IActionResult Edit(uint id)
+        {
+            var vm = _service.GetById(id);
+            if (vm == null)
+                return NotFound();
+
+            LoadRoles();
+            return View(vm);
+        }
+
+        [HttpPost("Edit/{id:long}")]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Edit(uint id, UserEditVm vm)
+        {
+            if (id != vm.Id)
+                return BadRequest();
+
+            if (!ModelState.IsValid)
+            {
+                LoadRoles();
+                return View(vm);
+            }
+
+            var errors = await _service.UpdateAsync(vm);
+            if (errors.Any())
+            {
+                foreach (var err in errors)
+                    ModelState.AddModelError(nameof(vm.NewPassword), err);
+
+                LoadRoles();
+                return View(vm);
+            }
+
+            return RedirectToAction(nameof(Index));
+        }
+
+        [HttpPost("Toggle")]
+        [ValidateAntiForgeryToken]
+        public IActionResult Toggle(uint id)
+        {
+            _service.Toggle(id);
+            return RedirectToAction(nameof(Index));
+        }
+
+        private void LoadRoles()
+        {
+            ViewBag.Roles = _service.GetRoles();
+        }
     }
 }

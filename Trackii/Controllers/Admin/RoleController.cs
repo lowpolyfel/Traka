@@ -17,20 +17,23 @@ public class RoleController : Controller
     }
 
     [HttpGet("")]
-    public IActionResult Index()
+    public IActionResult Index(string? search, bool showInactive = false, int page = 1)
     {
-        return View(new RoleListVm { Items = _svc.GetAll() });
+        var vm = _svc.GetPaged(search, showInactive, page, 10);
+        return View(vm);
     }
 
     [HttpGet("Create")]
-    public IActionResult Create() => View(new RoleEditVm());
+    public IActionResult Create()
+    {
+        return View(new RoleEditVm());
+    }
 
     [HttpPost("Create")]
     [ValidateAntiForgeryToken]
     public IActionResult Create(RoleEditVm vm)
     {
-        if (!ModelState.IsValid)
-            return View(vm);
+        if (!ModelState.IsValid) return View(vm);
 
         _svc.Create(vm);
         return RedirectToAction(nameof(Index));
@@ -49,12 +52,20 @@ public class RoleController : Controller
     public IActionResult Edit(uint id, RoleEditVm vm)
     {
         if (id != vm.Id) return BadRequest();
-
-        if (!ModelState.IsValid)
-            return View(vm);
+        if (!ModelState.IsValid) return View(vm);
 
         if (!_svc.Update(vm))
             TempData["Error"] = "No se puede editar un Role en uso.";
+
+        return RedirectToAction(nameof(Index));
+    }
+
+    [HttpPost("Toggle")]
+    [ValidateAntiForgeryToken]
+    public IActionResult Toggle(uint id)
+    {
+        if (!_svc.Toggle(id))
+            TempData["Error"] = "No se puede desactivar: hay usuarios activos usando este Role.";
 
         return RedirectToAction(nameof(Index));
     }

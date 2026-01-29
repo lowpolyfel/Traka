@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authentication.Cookies;
+﻿using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc.Authorization;
 using Trackii.Services;
@@ -37,13 +37,16 @@ builder.Services.AddControllersWithViews(options =>
 // Services
 // =====================
 builder.Services.AddScoped<AuthService>();
+
 builder.Services.AddScoped<AreaService>();
 builder.Services.AddScoped<FamilyService>();
 builder.Services.AddScoped<SubfamilyService>();
-builder.Services.AddScoped<ProductService>();
 builder.Services.AddScoped<LocationService>();
 builder.Services.AddScoped<RoleService>();
 builder.Services.AddScoped<UserService>();
+builder.Services.AddScoped<Trackii.Services.Admin.RouteService>();
+
+
 
 var app = builder.Build();
 

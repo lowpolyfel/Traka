@@ -2,21 +2,28 @@
 
 <h2>Usuarios</h2>
 
-<form method="get">
-    <input name="search" value="@Model.Search" placeholder="Buscar usuario..." />
-    <button type="submit">Buscar</button>
+<form method="get" action="/Admin/User">
+    <input name="search" value="@Model.Search" placeholder="Buscar username..." />
+
+    <label>
+        <input type="checkbox" name="showInactive" value="true"
+               @(Model.ShowInactive ? "checked" : "") />
+        Ver inactivos
+    </label>
+
+    <button type="submit">Filtrar</button>
+    <a href="/Admin/User/Create">Nuevo</a>
 </form>
 
-<a href="/Admin/User/Create">Nuevo</a>
-
-<table border="1">
+<table border="1" cellpadding="5">
     <tr>
-        <th>Usuario</th>
-        <th>Rol</th>
+        <th>Username</th>
+        <th>Role</th>
         <th>Activo</th>
         <th></th>
     </tr>
-    @foreach (var u in Model.Items)
+
+    @foreach (var u in Model.Rows)
     {
         <tr>
             <td>@u.Username</td>
@@ -24,15 +31,30 @@
             <td>@u.Active</td>
             <td>
                 <a href="/Admin/User/Edit/@u.Id">Editar</a>
-                <a href="/Admin/User/Toggle/@u.Id">@(u.Active ? "Desactivar" : "Activar")</a>
+
+                <form method="post" action="/Admin/User/Toggle" style="display:inline">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="id" value="@u.Id" />
+                    <button type="submit">@(u.Active ? "Desactivar" : "Activar")</button>
+                </form>
             </td>
         </tr>
     }
 </table>
 
-<div>
-    @for (int i = 1; i <= Model.TotalPages; i++)
-    {
-        <a href="?page=@i&search=@Model.Search">@i</a>
-    }
-</div>
+@if (Model.TotalPages > 1)
+{
+    <div>
+        @for (int i = 1; i <= Model.TotalPages; i++)
+        {
+            if (i == Model.Page)
+            {
+                <strong>@i</strong>
+            }
+            else
+            {
+                <a href="/Admin/User?page=@i&search=@Model.Search&showInactive=@(Model.ShowInactive ? "true" : "")">@i</a>
+            }
+        }
+    </div>
+}

@@ -1,20 +1,22 @@
 ﻿using System.ComponentModel.DataAnnotations;
 
-namespace Trackii.Models.Admin.User;
-
-public class UserEditVm
+namespace Trackii.Models.Admin.User
 {
-    public uint Id { get; set; }
+    public class UserEditVm
+    {
+        [Required]
+        public uint Id { get; set; }
 
-    [Required]
-    public string Username { get; set; } = "";
+        [Required]
+        public string Username { get; set; } = string.Empty;
 
-    [Required]
-    public uint RoleId { get; set; }
+        [Required]
+        public uint RoleId { get; set; }
 
-    public bool Active { get; set; }
+        public bool Active { get; set; }
 
-    // Solo para edición
-    [DataType(DataType.Password)]
-    public string? NewPassword { get; set; }
+        // Opcional. Si viene vacío, no se cambia.
+        [DataType(DataType.Password)]
+        public string? NewPassword { get; set; }
+    }
 }

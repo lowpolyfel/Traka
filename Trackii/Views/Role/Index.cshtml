@@ -2,20 +2,60 @@
 
 <h2>Roles</h2>
 
-<a href="/Admin/Role/Create">Nuevo</a>
+<form method="get" action="/Admin/Role">
+    <input name="search" value="@Model.Search" placeholder="Buscar..." />
 
-<table border="1">
+    <label>
+        <input type="checkbox" name="showInactive" value="true" @(Model.ShowInactive ? "checked" : "") />
+        Ver inactivos
+    </label>
+
+    <button type="submit">Filtrar</button>
+    <a href="/Admin/Role/Create">Nuevo</a>
+</form>
+
+@if (TempData["Error"] != null)
+{
+    <div style="color:red; font-weight:bold;">@TempData["Error"]</div>
+}
+
+<table border="1" cellpadding="5">
     <tr>
         <th>Nombre</th>
-        <th>Acciones</th>
+        <th>Activo</th>
+        <th></th>
     </tr>
     @foreach (var r in Model.Items)
     {
         <tr>
             <td>@r.Name</td>
+            <td>@r.Active</td>
             <td>
                 <a href="/Admin/Role/Edit/@r.Id">Editar</a>
+
+                <form method="post" action="/Admin/Role/Toggle" style="display:inline">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="id" value="@r.Id" />
+                    <button type="submit">@(r.Active ? "Desactivar" : "Activar")</button>
+                </form>
             </td>
         </tr>
     }
 </table>
+
+@if (Model.TotalPages > 1)
+{
+    <div>
+        @for (int i = 1; i <= Model.TotalPages; i++)
+        {
+            if (i == Model.Page)
+            {
+                <strong>@i</strong>
+            }
+            else
+            {
+                <a href="/Admin/Role?page=@i&search=@Model.Search&showInactive=@(Model.ShowInactive ? "true" : "")">@i</a>
+            }
+        }
+    </div>
+}
