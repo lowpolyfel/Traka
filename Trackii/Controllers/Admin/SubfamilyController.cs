@@ -5,8 +5,8 @@ using Trackii.Services.Admin;
 
 namespace Trackii.Controllers.Admin;
 
-[Authorize(Roles = "Admin")]
-[Route("Admin/Subfamily")]
+[Authorize]
+[Route("Admin/[controller]")]
 public class SubfamilyController : Controller
 {
     private readonly SubfamilyService _svc;
@@ -22,17 +22,10 @@ public class SubfamilyController : Controller
         uint? areaId,
         uint? familyId,
         string? search,
-        bool? showInactive,
+        bool showInactive = false,
         int page = 1)
     {
-        var vm = _svc.GetPaged(
-            areaId,
-            familyId,
-            search,
-            showInactive ?? false,
-            page,
-            10);
-
+        var vm = _svc.GetPaged(areaId, familyId, search, showInactive, page, 10);
         return View(vm);
     }
 
@@ -71,10 +64,8 @@ public class SubfamilyController : Controller
 
     [HttpPost("Edit/{id:long}")]
     [ValidateAntiForgeryToken]
-    public IActionResult Edit(uint id, SubfamilyEditVm vm)
+    public IActionResult Edit(SubfamilyEditVm vm)
     {
-        if (id != vm.Id) return BadRequest();
-
         if (!ModelState.IsValid)
         {
             ViewBag.Families = _svc.GetActiveFamilies();
@@ -86,18 +77,11 @@ public class SubfamilyController : Controller
     }
 
     // ===================== TOGGLE =====================
-    [HttpPost("Toggle")]
+    [HttpPost("Toggle/{id:long}")]
     [ValidateAntiForgeryToken]
-    public IActionResult Toggle(uint id, int active)
+    public IActionResult Toggle(uint id)
     {
-        var ok = _svc.SetActive(id, active == 1);
-
-        if (!ok)
-        {
-            TempData["Error"] =
-                "No se puede activar la Subfamily porque la Family está inactiva.";
-        }
-
+        _svc.SetActive(id, true); // el service valida padre activo
         return RedirectToAction(nameof(Index));
     }
 }

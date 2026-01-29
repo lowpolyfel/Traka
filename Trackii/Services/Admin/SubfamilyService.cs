@@ -24,8 +24,6 @@ public class SubfamilyService
     {
         var vm = new SubfamilyListVm
         {
-            AreaId = areaId,
-            FamilyId = familyId,
             Search = search,
             ShowInactive = showInactive,
             Page = page
@@ -34,33 +32,36 @@ public class SubfamilyService
         using var cn = new MySqlConnection(_conn);
         cn.Open();
 
-        vm.Areas = GetActiveAreas(cn);
-        vm.Families = GetActiveFamilies(cn, areaId);
-
         var where = " WHERE 1=1 ";
         if (!showInactive) where += " AND s.active = 1 ";
         if (areaId.HasValue) where += " AND a.id = @area ";
         if (familyId.HasValue) where += " AND f.id = @family ";
         if (!string.IsNullOrWhiteSpace(search)) where += " AND s.name LIKE @search ";
 
-        using var countCmd = new MySqlCommand($@"
+        // ---------- COUNT ----------
+        using (var countCmd = new MySqlCommand($@"
             SELECT COUNT(*)
             FROM subfamily s
-            JOIN family f ON f.id = s.id_family
-            JOIN area a ON a.id = f.id_area
-            {where}", cn);
+            JOIN family f ON f.id = s.family_id
+            JOIN area a ON a.id = f.area_id
+            {where}", cn))
+        {
+            AddFilters(countCmd, areaId, familyId, search);
+            var total = Convert.ToInt32(countCmd.ExecuteScalar());
+            vm.TotalPages = (int)Math.Ceiling(total / (double)pageSize);
+        }
 
-        AddFilters(countCmd, areaId, familyId, search);
-        var total = Convert.ToInt32(countCmd.ExecuteScalar());
-        vm.TotalPages = (int)Math.Ceiling(total / (double)pageSize);
-
+        // ---------- DATA ----------
         using var cmd = new MySqlCommand($@"
-            SELECT s.id, s.name, s.active,
-                   f.name AS family,
-                   a.name AS area
+            SELECT 
+                s.id,
+                s.name,
+                s.active,
+                f.name AS family_name,
+                a.name AS area_name
             FROM subfamily s
-            JOIN family f ON f.id = s.id_family
-            JOIN area a ON a.id = f.id_area
+            JOIN family f ON f.id = s.family_id
+            JOIN area a ON a.id = f.area_id
             {where}
             ORDER BY a.name, f.name, s.name
             LIMIT @off, @lim", cn);
@@ -72,18 +73,20 @@ public class SubfamilyService
         using var rd = cmd.ExecuteReader();
         while (rd.Read())
         {
-            vm.Items.Add(new SubfamilyListVm.Row
+            vm.Rows.Add(new SubfamilyListVm.Row
             {
                 Id = rd.GetUInt32("id"),
                 Name = rd.GetString("name"),
-                Active = rd.GetBoolean("active"),
-                Family = rd.GetString("family"),
-                Area = rd.GetString("area")
+                AreaName = rd.GetString("area_name"),
+                FamilyName = rd.GetString("family_name"),
+                Active = rd.GetBoolean("active")
             });
         }
 
         return vm;
     }
+
+
 
     // ===================== CRUD =====================
     public SubfamilyEditVm? GetById(uint id)
@@ -91,8 +94,10 @@ public class SubfamilyService
         using var cn = new MySqlConnection(_conn);
         cn.Open();
 
-        using var cmd = new MySqlCommand(
-            "SELECT id, id_family, name FROM subfamily WHERE id=@id", cn);
+        using var cmd = new MySqlCommand(@"
+            SELECT id, family_id, name
+            FROM subfamily
+            WHERE id=@id", cn);
 
         cmd.Parameters.AddWithValue("@id", id);
         using var rd = cmd.ExecuteReader();
@@ -101,7 +106,7 @@ public class SubfamilyService
         return new SubfamilyEditVm
         {
             Id = id,
-            FamilyId = rd.GetUInt32("id_family"),
+            FamilyId = rd.GetUInt32("family_id"),
             Name = rd.GetString("name")
         };
     }
@@ -111,8 +116,9 @@ public class SubfamilyService
         using var cn = new MySqlConnection(_conn);
         cn.Open();
 
-        using var cmd = new MySqlCommand(
-            "INSERT INTO subfamily (id_family, name, active) VALUES (@f,@n,1)", cn);
+        using var cmd = new MySqlCommand(@"
+            INSERT INTO subfamily (family_id, name, active)
+            VALUES (@f,@n,1)", cn);
 
         cmd.Parameters.AddWithValue("@f", vm.FamilyId);
         cmd.Parameters.AddWithValue("@n", vm.Name);
@@ -124,8 +130,10 @@ public class SubfamilyService
         using var cn = new MySqlConnection(_conn);
         cn.Open();
 
-        using var cmd = new MySqlCommand(
-            "UPDATE subfamily SET id_family=@f, name=@n WHERE id=@id", cn);
+        using var cmd = new MySqlCommand(@"
+            UPDATE subfamily
+            SET family_id=@f, name=@n
+            WHERE id=@id", cn);
 
         cmd.Parameters.AddWithValue("@id", vm.Id);
         cmd.Parameters.AddWithValue("@f", vm.FamilyId);
@@ -144,7 +152,7 @@ public class SubfamilyService
             using var chk = new MySqlCommand(@"
                 SELECT f.active
                 FROM subfamily s
-                JOIN family f ON f.id = s.id_family
+                JOIN family f ON f.id = s.family_id
                 WHERE s.id=@id", cn);
 
             chk.Parameters.AddWithValue("@id", id);
@@ -162,45 +170,6 @@ public class SubfamilyService
     }
 
     // ===================== HELPERS =====================
-    public List<(uint Id, string Name)> GetActiveFamilies()
-    {
-        using var cn = new MySqlConnection(_conn);
-        cn.Open();
-        return GetActiveFamilies(cn, null);
-    }
-
-    private static List<(uint, string)> GetActiveAreas(MySqlConnection cn)
-    {
-        var list = new List<(uint, string)>();
-        using var cmd = new MySqlCommand(
-            "SELECT id,name FROM area WHERE active=1 ORDER BY name", cn);
-
-        using var rd = cmd.ExecuteReader();
-        while (rd.Read())
-            list.Add((rd.GetUInt32(0), rd.GetString(1)));
-
-        rd.Close();
-        return list;
-    }
-
-    private static List<(uint, string)> GetActiveFamilies(MySqlConnection cn, uint? areaId)
-    {
-        var list = new List<(uint, string)>();
-        var sql = "SELECT id,name FROM family WHERE active=1";
-        if (areaId.HasValue) sql += " AND id_area=@a";
-
-        using var cmd = new MySqlCommand(sql, cn);
-        if (areaId.HasValue)
-            cmd.Parameters.AddWithValue("@a", areaId);
-
-        using var rd = cmd.ExecuteReader();
-        while (rd.Read())
-            list.Add((rd.GetUInt32(0), rd.GetString(1)));
-
-        rd.Close();
-        return list;
-    }
-
     private static void AddFilters(
         MySqlCommand cmd,
         uint? areaId,
