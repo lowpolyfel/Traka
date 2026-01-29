@@ -45,7 +45,7 @@ builder.Services.AddScoped<LocationService>();
 builder.Services.AddScoped<RoleService>();
 builder.Services.AddScoped<UserService>();
 builder.Services.AddScoped<Trackii.Services.Admin.RouteService>();
-
+builder.Services.AddScoped<ProductService>();
 
 
 var app = builder.Build();

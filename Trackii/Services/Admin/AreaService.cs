@@ -87,6 +87,21 @@ public class AreaService
         };
     }
 
+    // MÉTODO NECESARIO PARA VALIDAR DUPLICADOS
+    public bool Exists(string name, uint? id = null)
+    {
+        using var cn = new MySqlConnection(_conn);
+        cn.Open();
+        var query = "SELECT COUNT(*) FROM area WHERE name = @name";
+        if (id.HasValue) query += " AND id != @id";
+
+        using var cmd = new MySqlCommand(query, cn);
+        cmd.Parameters.AddWithValue("@name", name);
+        if (id.HasValue) cmd.Parameters.AddWithValue("@id", id.Value);
+
+        return Convert.ToInt32(cmd.ExecuteScalar()) > 0;
+    }
+
     public void Create(AreaEditVm vm)
     {
         using var cn = new MySqlConnection(_conn);
@@ -110,6 +125,7 @@ public class AreaService
         cmd.ExecuteNonQuery();
     }
 
+    // CASCADA: Si desactivas el área, se apagan familias, subfamilias y productos
     public void SetActive(uint id, bool active)
     {
         using var cn = new MySqlConnection(_conn);
@@ -126,10 +142,35 @@ public class AreaService
 
         if (!active)
         {
-            using var cmd = new MySqlCommand(
-                "UPDATE family SET active = 0 WHERE id_area = @id", cn, tx);
-            cmd.Parameters.AddWithValue("@id", id);
-            cmd.ExecuteNonQuery();
+            // Apagar Familias
+            using (var cmd = new MySqlCommand("UPDATE family SET active = 0 WHERE id_area = @id", cn, tx))
+            {
+                cmd.Parameters.AddWithValue("@id", id);
+                cmd.ExecuteNonQuery();
+            }
+
+            // Apagar Subfamilias
+            using (var cmd = new MySqlCommand(@"
+                UPDATE subfamily s 
+                JOIN family f ON f.id = s.id_family 
+                SET s.active = 0 
+                WHERE f.id_area = @id", cn, tx))
+            {
+                cmd.Parameters.AddWithValue("@id", id);
+                cmd.ExecuteNonQuery();
+            }
+
+            // Apagar Productos
+            using (var cmd = new MySqlCommand(@"
+                UPDATE product p
+                JOIN subfamily s ON s.id = p.id_subfamily
+                JOIN family f ON f.id = s.id_family
+                SET p.active = 0
+                WHERE f.id_area = @id", cn, tx))
+            {
+                cmd.Parameters.AddWithValue("@id", id);
+                cmd.ExecuteNonQuery();
+            }
         }
 
         tx.Commit();

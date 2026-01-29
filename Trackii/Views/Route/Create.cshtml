@@ -1,140 +1,134 @@
 ﻿@model Trackii.Models.Admin.Route.RouteEditVm
-@{
-    var subfamilies = ViewBag.Subfamilies as List<(uint Id, string Name)> ?? new();
-    var locations = ViewBag.Locations as List<(uint Id, string Name)> ?? new();
-}
 
-<h2>Crear Ruta</h2>
+<h2>Nueva Ruta</h2>
 
-@if (!string.IsNullOrWhiteSpace(Model.Error))
-{
-    <div style="color:red;">@Model.Error</div>
-}
-
-<form method="post" action="/Admin/Route/Save">
+<form method="post" action="/Admin/Route/Save" id="routeForm">
     @Html.AntiForgeryToken()
 
-    <label>Subfamily</label><br />
-    <select name="SubfamilyId" required>
-        <option value="">(Selecciona)</option>
-        @foreach (var sf in subfamilies)
-        {
-            <option value="@sf.Id">@sf.Name</option>
-        }
-    </select>
-    <br /><br />
+    @if (!ViewData.ModelState.IsValid)
+    {
+        <div class="alert alert-danger">
+            @Html.ValidationSummary()
+        </div>
+    }
 
-    <label>Nombre</label><br />
-    <input name="Name" value="@Model.Name" />
-    <br /><br />
-
-    <h3>Pasos (selecciona Locations)</h3>
-
-    <div id="locationsPanel">
-        @foreach (var loc in locations)
-        {
-            <label style="display:inline-block; margin-right:12px;">
-                <input type="checkbox" class="loc-check" data-id="@loc.Id" data-name="@loc.Name" />
-                @loc.Name
-            </label>
-        }
+    <div class="row">
+        <div class="col-md-6">
+            <label>Subfamilia</label>
+            <select asp-for="SubfamilyId" class="form-select" required>
+                <option value="">-- Selecciona --</option>
+                @foreach (var s in ViewBag.Subfamilies as List<(uint Id, string Name)>)
+                {
+                    <option value="@s.Id">@s.Name</option>
+                }
+            </select>
+        </div>
+        <div class="col-md-6">
+            <label>Nombre de Ruta</label>
+            <input asp-for="Name" class="form-control" placeholder="Ej: Ruta Estándar 2026" required />
+        </div>
     </div>
 
-    <h4>Orden actual</h4>
-    <div id="selectedSteps"></div>
+    <hr />
+    <h4>Pasos del Proceso (Flujo)</h4>
+    <p class="text-muted">Agrega las ubicaciones en orden. Usa las flechas para reordenar.</p>
 
-    <div id="stepsHidden"></div>
+    <table class="table table-bordered" id="stepsTable">
+        <thead>
+            <tr>
+                <th width="50">#</th>
+                <th>Ubicación (Location)</th>
+                <th width="120">Acción</th>
+            </tr>
+        </thead>
+        <tbody>
+        </tbody>
+    </table>
 
-    <br />
-    <button type="submit">Guardar</button>
-    <a href="/Admin/Route">Cancelar</a>
+    <button type="button" class="btn btn-secondary" onclick="addStep()">+ Agregar Paso</button>
+    <br /><br />
+
+    <button type="submit" class="btn btn-primary btn-lg">Guardar Ruta</button>
+    <a href="/Admin/Route" class="btn btn-light">Cancelar</a>
 </form>
 
-<script>
-    (function () {
-        // Array de { locationId, name }
-        let steps = [];
+<div style="display:none;">
+    <select id="locationsSource">
+        @foreach (var l in ViewBag.Locations as List<(uint Id, string Name)>)
+        {
+            <option value="@l.Id">@l.Name</option>
+        }
+    </select>
+</div>
 
-        const selectedStepsDiv = document.getElementById("selectedSteps");
-        const hiddenDiv = document.getElementById("stepsHidden");
+@section Scripts {
+    <script>
+        function addStep() {
+            var tbody = document.querySelector("#stepsTable tbody");
+            var index = tbody.rows.length;
+            var options = document.getElementById("locationsSource").innerHTML;
 
-        function render() {
-            // Render lista ordenada con botones subir/bajar/quitar
-            let html = "";
-            if (steps.length === 0) {
-                html = "<div>(Sin pasos todavía)</div>";
-            } else {
-                html += "<table border='1' cellpadding='6' cellspacing='0'>";
-                html += "<tr><th>#</th><th>Location</th><th>Acciones</th></tr>";
-                steps.forEach((s, idx) => {
-                    html += "<tr>";
-                    html += "<td>" + (idx + 1) + "</td>";
-                    html += "<td>" + s.name + "</td>";
-                    html += "<td>";
-                    html += "<button type='button' data-act='up' data-idx='" + idx + "'>↑</button> ";
-                    html += "<button type='button' data-act='down' data-idx='" + idx + "'>↓</button> ";
-                    html += "<button type='button' data-act='remove' data-idx='" + idx + "'>Quitar</button>";
-                    html += "</td>";
-                    html += "</tr>";
-                });
-                html += "</table>";
+            var row = `
+                <tr>
+                    <td class="step-index">${index + 1}</td>
+                    <td>
+                        <select name="Steps[${index}].LocationId" class="form-select">
+                            ${options}
+                        </select>
+                        <input type="hidden" name="Steps[${index}].StepNumber" value="${index + 1}" />
+                    </td>
+                    <td>
+                        <div class="btn-group">
+                            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="moveStepUp(this)">↑</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="moveStepDown(this)">↓</button>
+                            <button type="button" class="btn btn-danger btn-sm" onclick="removeStep(this)">X</button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+            tbody.insertAdjacentHTML('beforeend', row);
+        }
+
+        function removeStep(btn) {
+            var row = btn.closest("tr");
+            row.remove();
+            reindex();
+        }
+
+        function moveStepUp(btn) {
+            var row = btn.closest("tr");
+            var prevRow = row.previousElementSibling;
+            if (prevRow) {
+                row.parentNode.insertBefore(row, prevRow);
+                reindex();
             }
-            selectedStepsDiv.innerHTML = html;
+        }
 
-            // Hidden inputs para model binding: Steps[i].LocationId y Steps[i].StepNumber
-            let h = "";
-            steps.forEach((s, idx) => {
-                h += "<input type='hidden' name='Steps[" + idx + "].LocationId' value='" + s.locationId + "' />";
-                h += "<input type='hidden' name='Steps[" + idx + "].StepNumber' value='" + (idx + 1) + "' />";
-            });
-            hiddenDiv.innerHTML = h;
+        function moveStepDown(btn) {
+            var row = btn.closest("tr");
+            var nextRow = row.nextElementSibling;
+            if (nextRow) {
+                row.parentNode.insertBefore(nextRow, row);
+                reindex();
+            }
+        }
 
-            // Sincroniza checkboxes
-            document.querySelectorAll(".loc-check").forEach(ch => {
-                const id = parseInt(ch.getAttribute("data-id"));
-                ch.checked = steps.some(x => x.locationId === id);
+        function reindex() {
+            var rows = document.querySelectorAll("#stepsTable tbody tr");
+            rows.forEach((row, idx) => {
+                row.querySelector(".step-index").innerText = idx + 1;
+                var select = row.querySelector("select");
+                var hidden = row.querySelector("input[type=hidden]");
+
+                select.name = `Steps[${idx}].LocationId`;
+                hidden.name = `Steps[${idx}].StepNumber`;
+                hidden.value = idx + 1;
             });
         }
 
-        // Checkbox: agrega al final o quita
-        document.querySelectorAll(".loc-check").forEach(ch => {
-            ch.addEventListener("change", function () {
-                const id = parseInt(this.getAttribute("data-id"));
-                const name = this.getAttribute("data-name");
-
-                if (this.checked) {
-                    if (!steps.some(x => x.locationId === id)) {
-                        steps.push({ locationId: id, name: name });
-                    }
-                } else {
-                    steps = steps.filter(x => x.locationId !== id);
-                }
-                render();
-            });
-        });
-
-        // Acciones en tabla
-        selectedStepsDiv.addEventListener("click", function (e) {
-            const btn = e.target.closest("button");
-            if (!btn) return;
-
-            const act = btn.getAttribute("data-act");
-            const idx = parseInt(btn.getAttribute("data-idx"));
-
-            if (act === "remove") {
-                steps.splice(idx, 1);
-            } else if (act === "up" && idx > 0) {
-                const tmp = steps[idx - 1];
-                steps[idx - 1] = steps[idx];
-                steps[idx] = tmp;
-            } else if (act === "down" && idx < steps.length - 1) {
-                const tmp = steps[idx + 1];
-                steps[idx + 1] = steps[idx];
-                steps[idx] = tmp;
-            }
-            render();
-        });
-
-        render();
-    })();
-</script>
+        // Agregar uno inicial si está vacío
+        if(document.querySelectorAll("#stepsTable tbody tr").length === 0) {
+            addStep();
+        }
+    </script>
+}

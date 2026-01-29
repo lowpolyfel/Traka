@@ -47,8 +47,26 @@ public class SubfamilyController : Controller
             return View(vm);
         }
 
-        _svc.Create(vm);
-        return RedirectToAction(nameof(Index));
+        // 1. VALIDACIÓN DUPLICADOS (La que ya tenías)
+        if (_svc.Exists(vm.Name))
+        {
+            ModelState.AddModelError("Name", "Este nombre de Subfamilia ya existe.");
+            ViewBag.Families = _svc.GetActiveFamilies();
+            return View(vm);
+        }
+
+        // 2. INTENTO DE CREACIÓN (Con validación de Familia Activa)
+        try
+        {
+            _svc.Create(vm);
+            return RedirectToAction(nameof(Index));
+        }
+        catch (Exception ex)
+        {
+            ModelState.AddModelError("", ex.Message); // "La Familia seleccionada está inactiva"
+            ViewBag.Families = _svc.GetActiveFamilies();
+            return View(vm);
+        }
     }
 
     // ===================== EDIT =====================
@@ -72,10 +90,27 @@ public class SubfamilyController : Controller
             return View(vm);
         }
 
-        _svc.Update(vm);
-        return RedirectToAction(nameof(Index));
-    }
+        // 1. VALIDACIÓN DUPLICADOS (La que ya tenías)
+        if (_svc.Exists(vm.Name, vm.Id))
+        {
+            ModelState.AddModelError("Name", "Este nombre de Subfamilia ya existe.");
+            ViewBag.Families = _svc.GetActiveFamilies();
+            return View(vm);
+        }
 
+        // 2. INTENTO DE ACTUALIZACIÓN (Con validación de Familia Activa)
+        try
+        {
+            _svc.Update(vm);
+            return RedirectToAction(nameof(Index));
+        }
+        catch (Exception ex)
+        {
+            ModelState.AddModelError("", ex.Message);
+            ViewBag.Families = _svc.GetActiveFamilies();
+            return View(vm);
+        }
+    }
     // ===================== TOGGLE =====================
     [HttpPost("Toggle/{id:long}")]
     [ValidateAntiForgeryToken]
