@@ -35,12 +35,25 @@ public class RegisterApiService
             var roleCmd = cn.CreateCommand();
             roleCmd.Transaction = tx;
             roleCmd.CommandText = "SELECT id FROM role WHERE name='Piso' AND active=1";
-            var roleId = Convert.ToUInt32(roleCmd.ExecuteScalar());
+            var roleIdObj = roleCmd.ExecuteScalar();
+            if (roleIdObj == null)
+                throw new Exception("No existe el rol Piso activo");
 
-            // 3) Username automático
+            var roleId = Convert.ToUInt32(roleIdObj);
+
+            // 3) Username automático (Variante B)
             var username = $"PISO-{dto.DeviceUid}";
 
-            // 4) Crear usuario
+            // 4) Evitar doble registro
+            var existsUserCmd = cn.CreateCommand();
+            existsUserCmd.Transaction = tx;
+            existsUserCmd.CommandText = "SELECT 1 FROM user WHERE username=@u LIMIT 1";
+            existsUserCmd.Parameters.AddWithValue("@u", username);
+
+            if (existsUserCmd.ExecuteScalar() != null)
+                throw new Exception("Este dispositivo ya está registrado");
+
+            // 5) Crear usuario
             var hasher = new PasswordHasher<string>();
             var hash = hasher.HashPassword(username, dto.Password);
 
@@ -57,23 +70,40 @@ public class RegisterApiService
 
             var userId = (uint)userCmd.LastInsertedId;
 
-            // 5) Crear / actualizar device
+            // 6) Crear / upsert device SIN localidad
             var deviceCmd = cn.CreateCommand();
             deviceCmd.Transaction = tx;
             deviceCmd.CommandText = """
                 INSERT INTO devices (device_uid, name, location_id, active)
-                VALUES (@uid, @name, @loc, 1)
+                VALUES (@uid, @name, NULL, 1)
                 ON DUPLICATE KEY UPDATE
                     name = VALUES(name),
-                    location_id = VALUES(location_id),
                     active = 1
             """;
             deviceCmd.Parameters.AddWithValue("@uid", dto.DeviceUid);
             deviceCmd.Parameters.AddWithValue("@name", (object?)dto.DeviceName ?? DBNull.Value);
-            deviceCmd.Parameters.AddWithValue("@loc", dto.LocationId);
             deviceCmd.ExecuteNonQuery();
 
-            var deviceId = (uint)deviceCmd.LastInsertedId;
+            uint deviceId;
+            var lastId = (uint)deviceCmd.LastInsertedId;
+
+            if (lastId != 0)
+            {
+                deviceId = lastId;
+            }
+            else
+            {
+                var getDevId = cn.CreateCommand();
+                getDevId.Transaction = tx;
+                getDevId.CommandText = "SELECT id FROM devices WHERE device_uid=@uid";
+                getDevId.Parameters.AddWithValue("@uid", dto.DeviceUid);
+
+                var devIdObj = getDevId.ExecuteScalar();
+                if (devIdObj == null)
+                    throw new Exception("No se pudo resolver el DeviceId");
+
+                deviceId = Convert.ToUInt32(devIdObj);
+            }
 
             tx.Commit();
 
@@ -82,7 +112,7 @@ public class RegisterApiService
                 UserId = userId,
                 DeviceId = deviceId,
                 Username = username,
-                Jwt = "" // JWT se obtiene vía /auth/login
+                Jwt = "" // Login se hace después
             };
         }
         catch

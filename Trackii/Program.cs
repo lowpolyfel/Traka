@@ -74,6 +74,7 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<LobbyService>();
 builder.Services.AddScoped<ViewCatalogService>();
 builder.Services.AddScoped<RegisterApiService>();
+builder.Services.AddScoped<LocationListApiService>();
 
 builder.Services.AddScoped<AreaService>();
 builder.Services.AddScoped<FamilyService>();

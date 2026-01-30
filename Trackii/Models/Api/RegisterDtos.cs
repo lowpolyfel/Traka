@@ -5,7 +5,6 @@ public class RegisterRequestDto
     public string Token { get; set; } = "";
     public string DeviceUid { get; set; } = "";
     public string? DeviceName { get; set; }
-    public uint LocationId { get; set; }
     public string Password { get; set; } = "";
 }
 
