@@ -70,6 +70,7 @@ builder.Services.AddControllersWithViews(options =>
 // Services (existentes)
 // =====================
 builder.Services.AddScoped<AuthService>();
+builder.Services.AddHttpContextAccessor();
 
 builder.Services.AddScoped<AreaService>();
 builder.Services.AddScoped<FamilyService>();

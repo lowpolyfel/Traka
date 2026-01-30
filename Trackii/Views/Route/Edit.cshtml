@@ -1,165 +1,91 @@
-﻿@model Trackii.Models.Admin.Route.RouteEditVm
+﻿@model Trackii.Models.Admin.User.UserEditVm
+@{
+    ViewData["Title"] = "Editar Usuario";
+    var roles = ViewBag.Roles as List<(uint Id, string Name)> ?? new();
+}
 
-<h2>Editar Ruta: @Model.Version</h2>
+<div class="card">
 
-<form method="post" action="/Admin/Route/Save">
-    @Html.AntiForgeryToken()
-    <input type="hidden" asp-for="Id" />
-    <input type="hidden" asp-for="Version" />
+    <div class="page-header">
+        <div>
+            <h2>Editar Usuario</h2>
+            <p class="subtitle">Puedes cambiar rol/estado y (opcional) contraseña</p>
+        </div>
 
-    @if (!ViewData.ModelState.IsValid)
-    {
-        <div class="alert alert-danger">@Html.ValidationSummary()</div>
-    }
+        <a href="/Admin/User" class="btn btn-secondary">
+            <i class="fa-solid fa-arrow-left"></i>
+            Volver
+        </a>
+    </div>
 
-    <div class="row">
-        <div class="col-md-6">
-            <label>Subfamilia</label>
-            <select asp-for="SubfamilyId" class="form-select" required>
-                @foreach (var s in ViewBag.Subfamilies as List<(uint Id, string Name)>)
-                {
-                    if (s.Id == Model.SubfamilyId)
+    <div asp-validation-summary="ModelOnly" class="field-error"></div>
+
+    <!-- Nota: el action es la misma URL /Admin/User/Edit/{id} porque el controller usa [HttpPost("Edit/{id:long}")] -->
+    <form method="post" class="form">
+        @Html.AntiForgeryToken()
+
+        <input type="hidden" asp-for="Id" />
+
+        <div class="form-grid">
+
+            <div class="form-field">
+                <label asp-for="Username"></label>
+                <input asp-for="Username" class="input" />
+                <span asp-validation-for="Username" class="field-error"></span>
+            </div>
+
+            <div class="form-field">
+                <label>Rol</label>
+                <select asp-for="RoleId" class="input">
+                    @foreach (var r in roles)
                     {
-                        <option value="@s.Id" selected>@s.Name</option>
+                        if (r.Id == Model.RoleId)
+                        {
+                            <option value="@r.Id" selected="selected">@r.Name</option>
+                        }
+                        else
+                        {
+                            <option value="@r.Id">@r.Name</option>
+                        }
+                    }
+                </select>
+                <span asp-validation-for="RoleId" class="field-error"></span>
+            </div>
+
+            <div class="form-field">
+                <label asp-for="Active">Activo</label>
+                <label class="checkbox" style="gap:10px;">
+                    @if (Model.Active)
+                    {
+                        <input asp-for="Active" type="checkbox" checked="checked" />
                     }
                     else
                     {
-                        <option value="@s.Id">@s.Name</option>
+                        <input asp-for="Active" type="checkbox" />
                     }
-                }
-            </select>
-            <small class="text-muted">Nota: Si cambias la subfamilia, la ruta pasará a ser inactiva para evitar conflictos.</small>
+                    <span class="muted">Permite acceso al sistema</span>
+                </label>
+            </div>
+
+            <div class="form-field">
+                <label asp-for="NewPassword">Nueva contraseña (opcional)</label>
+                <input asp-for="NewPassword" type="password" class="input" />
+                <span asp-validation-for="NewPassword" class="field-error"></span>
+            </div>
+
         </div>
-        <div class="col-md-6">
-            <label>Nombre de Ruta</label>
-            <input asp-for="Name" class="form-control" required />
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">
+                <i class="fa-solid fa-floppy-disk"></i>
+                Guardar
+            </button>
+            <a href="/Admin/User" class="btn btn-secondary">Cancelar</a>
         </div>
-    </div>
+    </form>
 
-    <hr />
-    <h4>Pasos del Proceso</h4>
-
-    <table class="table table-bordered" id="stepsTable">
-        <thead>
-            <tr>
-                <th width="50">#</th>
-                <th>Ubicación (Location)</th>
-                <th width="120">Acción</th>
-            </tr>
-        </thead>
-        <tbody>
-            @for (int i = 0; i < Model.Steps.Count; i++)
-            {
-                <tr>
-                    <td class="step-index">@(i + 1)</td>
-                    <td>
-                        <select name="Steps[@i].LocationId" class="form-select">
-                            @foreach (var l in ViewBag.Locations as List<(uint Id, string Name)>)
-                            {
-                                if (l.Id == Model.Steps[i].LocationId)
-                                {
-                                    <option value="@l.Id" selected>@l.Name</option>
-                                }
-                                else
-                                {
-                                    <option value="@l.Id">@l.Name</option>
-                                }
-                            }
-                        </select>
-                        <input type="hidden" name="Steps[@i].StepNumber" value="@(i + 1)" />
-                    </td>
-                    <td>
-                        <div class="btn-group">
-                            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="moveStepUp(this)" title="Subir">↑</button>
-                            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="moveStepDown(this)" title="Bajar">↓</button>
-                            <button type="button" class="btn btn-danger btn-sm" onclick="removeStep(this)" title="Eliminar">X</button>
-                        </div>
-                    </td>
-                </tr>
-            }
-        </tbody>
-    </table>
-
-    <button type="button" class="btn btn-secondary" onclick="addStep()">+ Agregar Paso</button>
-    <br /><br />
-
-    <button type="submit" class="btn btn-primary btn-lg">Guardar Cambios</button>
-    <a href="/Admin/Route" class="btn btn-light">Cancelar</a>
-</form>
-
-<div style="display:none;">
-    <select id="locationsSource">
-        @foreach (var l in ViewBag.Locations as List<(uint Id, string Name)>)
-        {
-            <option value="@l.Id">@l.Name</option>
-        }
-    </select>
 </div>
 
 @section Scripts {
-    <script>
-        function addStep() {
-            var tbody = document.querySelector("#stepsTable tbody");
-            var index = tbody.rows.length;
-            var options = document.getElementById("locationsSource").innerHTML;
-
-            var row = `
-                <tr>
-                    <td class="step-index">${index + 1}</td>
-                    <td>
-                        <select name="Steps[${index}].LocationId" class="form-select">
-                            ${options}
-                        </select>
-                        <input type="hidden" name="Steps[${index}].StepNumber" value="${index + 1}" />
-                    </td>
-                    <td>
-                        <div class="btn-group">
-                            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="moveStepUp(this)">↑</button>
-                            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="moveStepDown(this)">↓</button>
-                            <button type="button" class="btn btn-danger btn-sm" onclick="removeStep(this)">X</button>
-                        </div>
-                    </td>
-                </tr>
-            `;
-            tbody.insertAdjacentHTML('beforeend', row);
-        }
-
-        function removeStep(btn) {
-            var row = btn.closest("tr");
-            row.remove();
-            reindex();
-        }
-
-        function moveStepUp(btn) {
-            var row = btn.closest("tr");
-            var prevRow = row.previousElementSibling;
-            if (prevRow) {
-                row.parentNode.insertBefore(row, prevRow);
-                reindex();
-            }
-        }
-
-        function moveStepDown(btn) {
-            var row = btn.closest("tr");
-            var nextRow = row.nextElementSibling;
-            if (nextRow) {
-                row.parentNode.insertBefore(nextRow, row);
-                reindex();
-            }
-        }
-
-        function reindex() {
-            var rows = document.querySelectorAll("#stepsTable tbody tr");
-            rows.forEach((row, idx) => {
-                row.querySelector(".step-index").innerText = idx + 1;
-                var select = row.querySelector("select");
-                var hidden = row.querySelector("input[type=hidden]");
-
-                // Es vital actualizar el atributo 'name' para que el ModelBinder de .NET reciba la lista en orden
-                select.name = `Steps[${idx}].LocationId`;
-                hidden.name = `Steps[${idx}].StepNumber`;
-                hidden.value = idx + 1;
-            });
-        }
-    </script>
+    <partial name="_ValidationScriptsPartial" />
 }

@@ -1,134 +1,66 @@
-﻿@model Trackii.Models.Admin.Route.RouteEditVm
+﻿@model Trackii.Models.Admin.User.UserCreateVm
+@{
+    ViewData["Title"] = "Nuevo Usuario";
+    var roles = ViewBag.Roles as List<(uint Id, string Name)> ?? new();
+}
 
-<h2>Nueva Ruta</h2>
+<div class="card">
 
-<form method="post" action="/Admin/Route/Save" id="routeForm">
-    @Html.AntiForgeryToken()
-
-    @if (!ViewData.ModelState.IsValid)
-    {
-        <div class="alert alert-danger">
-            @Html.ValidationSummary()
+    <div class="page-header">
+        <div>
+            <h2>Nuevo Usuario</h2>
+            <p class="subtitle">Crea un usuario y asígnale un rol</p>
         </div>
-    }
 
-    <div class="row">
-        <div class="col-md-6">
-            <label>Subfamilia</label>
-            <select asp-for="SubfamilyId" class="form-select" required>
-                <option value="">-- Selecciona --</option>
-                @foreach (var s in ViewBag.Subfamilies as List<(uint Id, string Name)>)
-                {
-                    <option value="@s.Id">@s.Name</option>
-                }
-            </select>
-        </div>
-        <div class="col-md-6">
-            <label>Nombre de Ruta</label>
-            <input asp-for="Name" class="form-control" placeholder="Ej: Ruta Estándar 2026" required />
-        </div>
+        <a href="/Admin/User" class="btn btn-secondary">
+            <i class="fa-solid fa-arrow-left"></i>
+            Volver
+        </a>
     </div>
 
-    <hr />
-    <h4>Pasos del Proceso (Flujo)</h4>
-    <p class="text-muted">Agrega las ubicaciones en orden. Usa las flechas para reordenar.</p>
+    <div asp-validation-summary="ModelOnly" class="field-error"></div>
 
-    <table class="table table-bordered" id="stepsTable">
-        <thead>
-            <tr>
-                <th width="50">#</th>
-                <th>Ubicación (Location)</th>
-                <th width="120">Acción</th>
-            </tr>
-        </thead>
-        <tbody>
-        </tbody>
-    </table>
+    <form method="post" class="form">
+        @Html.AntiForgeryToken()
 
-    <button type="button" class="btn btn-secondary" onclick="addStep()">+ Agregar Paso</button>
-    <br /><br />
+        <div class="form-grid">
 
-    <button type="submit" class="btn btn-primary btn-lg">Guardar Ruta</button>
-    <a href="/Admin/Route" class="btn btn-light">Cancelar</a>
-</form>
+            <div class="form-field">
+                <label asp-for="Username"></label>
+                <input asp-for="Username" class="input" />
+                <span asp-validation-for="Username" class="field-error"></span>
+            </div>
 
-<div style="display:none;">
-    <select id="locationsSource">
-        @foreach (var l in ViewBag.Locations as List<(uint Id, string Name)>)
-        {
-            <option value="@l.Id">@l.Name</option>
-        }
-    </select>
+            <div class="form-field">
+                <label>Rol</label>
+                <select asp-for="RoleId" class="input">
+                    @foreach (var r in roles)
+                    {
+                        <option value="@r.Id">@r.Name</option>
+                    }
+                </select>
+                <span asp-validation-for="RoleId" class="field-error"></span>
+            </div>
+
+            <div class="form-field">
+                <label asp-for="Password"></label>
+                <input asp-for="Password" type="password" class="input" />
+                <span asp-validation-for="Password" class="field-error"></span>
+            </div>
+
+        </div>
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">
+                <i class="fa-solid fa-floppy-disk"></i>
+                Crear
+            </button>
+            <a href="/Admin/User" class="btn btn-secondary">Cancelar</a>
+        </div>
+    </form>
+
 </div>
 
 @section Scripts {
-    <script>
-        function addStep() {
-            var tbody = document.querySelector("#stepsTable tbody");
-            var index = tbody.rows.length;
-            var options = document.getElementById("locationsSource").innerHTML;
-
-            var row = `
-                <tr>
-                    <td class="step-index">${index + 1}</td>
-                    <td>
-                        <select name="Steps[${index}].LocationId" class="form-select">
-                            ${options}
-                        </select>
-                        <input type="hidden" name="Steps[${index}].StepNumber" value="${index + 1}" />
-                    </td>
-                    <td>
-                        <div class="btn-group">
-                            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="moveStepUp(this)">↑</button>
-                            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="moveStepDown(this)">↓</button>
-                            <button type="button" class="btn btn-danger btn-sm" onclick="removeStep(this)">X</button>
-                        </div>
-                    </td>
-                </tr>
-            `;
-            tbody.insertAdjacentHTML('beforeend', row);
-        }
-
-        function removeStep(btn) {
-            var row = btn.closest("tr");
-            row.remove();
-            reindex();
-        }
-
-        function moveStepUp(btn) {
-            var row = btn.closest("tr");
-            var prevRow = row.previousElementSibling;
-            if (prevRow) {
-                row.parentNode.insertBefore(row, prevRow);
-                reindex();
-            }
-        }
-
-        function moveStepDown(btn) {
-            var row = btn.closest("tr");
-            var nextRow = row.nextElementSibling;
-            if (nextRow) {
-                row.parentNode.insertBefore(nextRow, row);
-                reindex();
-            }
-        }
-
-        function reindex() {
-            var rows = document.querySelectorAll("#stepsTable tbody tr");
-            rows.forEach((row, idx) => {
-                row.querySelector(".step-index").innerText = idx + 1;
-                var select = row.querySelector("select");
-                var hidden = row.querySelector("input[type=hidden]");
-
-                select.name = `Steps[${idx}].LocationId`;
-                hidden.name = `Steps[${idx}].StepNumber`;
-                hidden.value = idx + 1;
-            });
-        }
-
-        // Agregar uno inicial si está vacío
-        if(document.querySelectorAll("#stepsTable tbody tr").length === 0) {
-            addStep();
-        }
-    </script>
+    <partial name="_ValidationScriptsPartial" />
 }
