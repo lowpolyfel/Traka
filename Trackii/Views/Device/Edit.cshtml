@@ -2,61 +2,39 @@
 
 @{
     ViewData["Title"] = "Editar Device";
-    var locations = ViewBag.Locations as List<(uint Id, string Name)> ?? new();
 }
 
-<div class="card">
-    <div class="page-header">
-        <div>
-            <h2>Editar Device</h2>
-            <p class="subtitle">Actualiza la información del dispositivo</p>
-        </div>
+<h2>Editar Device</h2>
 
-        <a href="/Admin/Device" class="btn btn-secondary">
-            <i class="fa-solid fa-arrow-left"></i>
-            Volver
-        </a>
+<form asp-action="Edit" method="post">
+    @Html.AntiForgeryToken()
+    <input type="hidden" asp-for="Id" />
+
+    <div class="mb-3">
+        <label asp-for="DeviceUid" class="form-label"></label>
+        <input asp-for="DeviceUid" class="form-control" />
+        <span asp-validation-for="DeviceUid" class="text-danger"></span>
     </div>
 
-    <form method="post" class="form">
-        @Html.AntiForgeryToken()
-        <input type="hidden" asp-for="Id" />
+    <div class="mb-3">
+        <label asp-for="Name" class="form-label"></label>
+        <input asp-for="Name" class="form-control" />
+        <span asp-validation-for="Name" class="text-danger"></span>
+    </div>
 
-        <div class="form-grid">
-            <div class="form-field">
-                <label asp-for="DeviceUid"></label>
-                <input asp-for="DeviceUid" class="input" />
-                <span asp-validation-for="DeviceUid" class="field-error"></span>
-            </div>
+    <div class="mb-3">
+        <label asp-for="LocationId" class="form-label">Location</label>
+        <select asp-for="LocationId"
+                asp-items="ViewBag.Locations"
+                class="form-select">
+            <option value="">-- Selecciona --</option>
+        </select>
+        <span asp-validation-for="LocationId" class="text-danger"></span>
+    </div>
 
-            <div class="form-field">
-                <label asp-for="Name"></label>
-                <input asp-for="Name" class="input" />
-                <span asp-validation-for="Name" class="field-error"></span>
-            </div>
-
-            <div class="form-field">
-                <label asp-for="LocationId">Localidad</label>
-                <select asp-for="LocationId" class="input">
-                    <option value="">Selecciona una localidad</option>
-                    @foreach (var l in locations)
-                    {
-                        <option value="@l.Id" @(l.Id == Model.LocationId ? "selected" : "")>@l.Name</option>
-                    }
-                </select>
-                <span asp-validation-for="LocationId" class="field-error"></span>
-            </div>
-        </div>
-
-        <div class="form-actions">
-            <button type="submit" class="btn btn-primary">
-                <i class="fa-solid fa-floppy-disk"></i>
-                Guardar
-            </button>
-            <a href="/Admin/Device" class="btn btn-secondary">Cancelar</a>
-        </div>
-    </form>
-</div>
+    <button type="submit" class="btn btn-primary">Guardar</button>
+    <a asp-action="Index" class="btn btn-secondary">Cancelar</a>
+</form>
 
 @section Scripts {
     <partial name="_ValidationScriptsPartial" />

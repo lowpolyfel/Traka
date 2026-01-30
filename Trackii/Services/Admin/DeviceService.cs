@@ -1,4 +1,5 @@
 ﻿using MySql.Data.MySqlClient;
+using System.Data;
 using Trackii.Models.Admin.Device;
 
 namespace Trackii.Services.Admin;
