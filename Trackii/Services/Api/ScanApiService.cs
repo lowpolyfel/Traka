@@ -1,5 +1,6 @@
 ﻿using MySql.Data.MySqlClient;
 using System.Data;
+using Trackii.Models.Api;
 
 namespace Trackii.Services.Api;
 
@@ -14,9 +15,14 @@ public class ScanApiService
     }
 
     // =========================================================
-    // SCAN
+    // SCAN  (FASE 2: LOTE + NO. PARTE)
     // =========================================================
-    public ScanResult Scan(uint userId, uint deviceId, string woNumber, uint qty)
+    public ScanResult Scan(
+        uint userId,
+        uint deviceId,
+        string lot,
+        string partNumber,
+        uint qty)
     {
         using var cn = new MySqlConnection(_conn);
         cn.Open();
@@ -24,68 +30,95 @@ public class ScanApiService
 
         try
         {
-            // 1) Device location (YA NO TRUENA: devuelve resultado controlado)
+            // 1) Device location
             var devLoc = GetDeviceLocation(cn, tx, deviceId);
             if (devLoc == null)
             {
-                // Aquí NO tenemos wip_item_id ni step aún; no insertamos scan_event.
-                // Se regresa error controlado para que la app muestre mensaje.
                 tx.Commit();
                 return new ScanResult
                 {
                     Ok = false,
-                    Advanced = false,
                     Status = "NONE",
                     Reason = "DEVICE_INVALID"
                 };
             }
 
-            var (deviceLocationId, deviceLocationName) = devLoc.Value;
+            var (deviceLocationId, _) = devLoc.Value;
 
-            // 2) Work order + active route (USAR woNumber DIRECTO)
-            var woInfo = GetWorkOrderInfo(cn, tx, woNumber);
-            if (woInfo == null)
+            // 2) Product by part number
+            var productId = GetProductId(cn, tx, partNumber);
+            if (productId == null)
             {
                 tx.Commit();
                 return new ScanResult
                 {
                     Ok = false,
                     Status = "NONE",
-                    Reason = "WO_NOT_FOUND"
+                    Reason = "PRODUCT_NOT_FOUND"
                 };
             }
 
+            // 3) Work order por LOTE (wo_number = lot)
+            var workOrderId = GetOrCreateWorkOrder(cn, tx, lot, productId.Value);
 
-            var (workOrderId, activeRouteId) = woInfo.Value;
+            // 4) Active route
+            var activeRouteId = GetActiveRouteId(cn, tx, productId.Value);
             if (activeRouteId == 0)
             {
                 tx.Commit();
-                return new ScanResult { Ok = false, Status = "NONE", Reason = "NO_ACTIVE_ROUTE" };
+                return new ScanResult
+                {
+                    Ok = false,
+                    Status = "NONE",
+                    Reason = "NO_ACTIVE_ROUTE"
+                };
             }
 
-            // 3) Get or create WIP (locked)
+            // 5) Get or create WIP (locked)
             var (wipItemId, wipStatus, routeId, currentStepId) =
                 GetOrCreateWipLocked(cn, tx, workOrderId, activeRouteId);
+
+            if (wipStatus == "HOLD")
+            {
+                tx.Commit();
+                return new ScanResult
+                {
+                    Ok = false,
+                    Status = "HOLD",
+                    Reason = "WIP_ON_REWORK"
+                };
+            }
+
 
             if (wipStatus is "FINISHED" or "SCRAPPED")
             {
                 InsertScanEvent(cn, tx, wipItemId, currentStepId, "ERROR");
                 tx.Commit();
-                return new ScanResult { Ok = false, Status = wipStatus, Reason = "WIP_CLOSED" };
+                return new ScanResult
+                {
+                    Ok = false,
+                    Status = wipStatus,
+                    Reason = "WIP_CLOSED"
+                };
             }
 
-            // 4) Current step meta
+            // 6) Current step meta
             var stepMeta = GetStepMetaLocked(cn, tx, routeId, currentStepId);
             if (stepMeta == null)
             {
                 InsertScanEvent(cn, tx, wipItemId, currentStepId, "ERROR");
                 tx.Commit();
-                return new ScanResult { Ok = false, Status = "NONE", Reason = "STEP_INVALID" };
+                return new ScanResult
+                {
+                    Ok = false,
+                    Status = "NONE",
+                    Reason = "STEP_INVALID"
+                };
             }
 
             var (currentStepNumber, expectedLocationId) = stepMeta.Value;
 
-            // 5) Validate station
+            // 7) Validate station
             if (expectedLocationId != deviceLocationId)
             {
                 InsertScanEvent(cn, tx, wipItemId, currentStepId, "ERROR");
@@ -101,10 +134,10 @@ public class ScanApiService
                 };
             }
 
-            // 6) Previous qty
+            // 8) Previous qty
             uint? previousQty = GetPreviousQty(cn, tx, wipItemId, routeId, currentStepNumber);
 
-            // 7) Qty validation
+            // 9) Qty validation
             if (previousQty.HasValue && qty > previousQty.Value)
             {
                 InsertScanEvent(cn, tx, wipItemId, currentStepId, "ERROR");
@@ -120,10 +153,10 @@ public class ScanApiService
                 };
             }
 
-            // 8) Scrap calculation
+            // 10) Scrap calculation
             uint scrap = previousQty.HasValue ? previousQty.Value - qty : 0;
 
-            // 9) Prevent double exit
+            // 11) Prevent double exit
             if (HasExitForStepLocked(cn, tx, wipItemId, currentStepId))
             {
                 InsertScanEvent(cn, tx, wipItemId, currentStepId, "ERROR");
@@ -138,10 +171,10 @@ public class ScanApiService
                 };
             }
 
-            // 10) ENTRY
+            // 12) ENTRY
             InsertScanEvent(cn, tx, wipItemId, currentStepId, "ENTRY");
 
-            // 11) Step execution
+            // 13) Step execution
             using (var ins = new MySqlCommand(@"
                 INSERT INTO wip_step_execution
                     (wip_item_id, route_step_id, user_id, device_id, location_id, create_at, qty_in, qty_scrap)
@@ -161,10 +194,10 @@ public class ScanApiService
                 ins.ExecuteNonQuery();
             }
 
-            // 12) EXIT
+            // 14) EXIT
             InsertScanEvent(cn, tx, wipItemId, currentStepId, "EXIT");
 
-            // 13) Scrap total
+            // 15) Scrap total
             if (qty == 0)
             {
                 using var up = new MySqlCommand(
@@ -183,7 +216,7 @@ public class ScanApiService
                 };
             }
 
-            // 14) Next step
+            // 16) Next step
             var next = GetNextStepMeta(cn, tx, routeId, currentStepNumber + 1);
             if (next == null)
             {
@@ -236,7 +269,7 @@ public class ScanApiService
     }
 
     // =========================================================
-    // QUICK STATUS  (CORREGIDO – SIN DOBLE DATAREADER)
+    // QUICK STATUS
     // =========================================================
     public WoQuickStatusResult? GetQuickStatus(string woNumber)
     {
@@ -260,7 +293,6 @@ public class ScanApiService
             uint? routeId = null;
             uint? currentStepId = null;
 
-            // ---- leer WIP y CERRAR reader
             using (var cmd = new MySqlCommand(@"
                 SELECT id, status, route_id, current_step_id
                 FROM wip_item
@@ -278,7 +310,6 @@ public class ScanApiService
                 }
             }
 
-            // ---- NO WIP
             if (wipItemId == null)
             {
                 string? locName = null;
@@ -306,7 +337,6 @@ public class ScanApiService
                 };
             }
 
-            // ---- HAY WIP
             var meta = GetStepMetaLocked(cn, tx, routeId!.Value, currentStepId!.Value);
             if (meta == null)
             {
@@ -346,8 +376,6 @@ public class ScanApiService
     // =========================================================
     // HELPERS
     // =========================================================
-
-    // CAMBIO: ahora devuelve null si el device no existe o está inactivo.
     private static (uint LocationId, string LocationName)? GetDeviceLocation(
         MySqlConnection cn, MySqlTransaction tx, uint deviceId)
     {
@@ -363,6 +391,54 @@ public class ScanApiService
         if (!rd.Read()) return null;
 
         return (rd.GetUInt32("location_id"), rd.GetString("name"));
+    }
+
+    private static uint? GetProductId(
+        MySqlConnection cn, MySqlTransaction tx, string partNumber)
+    {
+        using var cmd = new MySqlCommand(
+            "SELECT id FROM product WHERE part_number=@p AND active=1 LIMIT 1", cn, tx);
+        cmd.Parameters.AddWithValue("@p", partNumber);
+        var obj = cmd.ExecuteScalar();
+        return obj == null ? null : Convert.ToUInt32(obj);
+    }
+
+    private static uint GetOrCreateWorkOrder(
+        MySqlConnection cn, MySqlTransaction tx,
+        string lot, uint productId)
+    {
+        using (var q = new MySqlCommand(
+            "SELECT id FROM work_order WHERE wo_number=@wo LIMIT 1 FOR UPDATE", cn, tx))
+        {
+            q.Parameters.AddWithValue("@wo", lot);
+            var obj = q.ExecuteScalar();
+            if (obj != null) return Convert.ToUInt32(obj);
+        }
+
+        using (var ins = new MySqlCommand(@"
+            INSERT INTO work_order (wo_number, product_id, status)
+            VALUES (@wo, @p, 'OPEN')", cn, tx))
+        {
+            ins.Parameters.AddWithValue("@wo", lot);
+            ins.Parameters.AddWithValue("@p", productId);
+            ins.ExecuteNonQuery();
+            return Convert.ToUInt32(ins.LastInsertedId);
+        }
+    }
+
+    private static uint GetActiveRouteId(
+        MySqlConnection cn, MySqlTransaction tx, uint productId)
+    {
+        using var cmd = new MySqlCommand(@"
+            SELECT sf.active_route_id
+            FROM product p
+            JOIN subfamily sf ON sf.id = p.id_subfamily
+            WHERE p.id=@p
+            LIMIT 1", cn, tx);
+
+        cmd.Parameters.AddWithValue("@p", productId);
+        var obj = cmd.ExecuteScalar();
+        return obj == null ? 0u : Convert.ToUInt32(obj);
     }
 
     private static (uint WorkOrderId, uint ActiveRouteId)? GetWorkOrderInfo(
@@ -387,7 +463,8 @@ public class ScanApiService
     }
 
     private static (uint WipItemId, string Status, uint RouteId, uint CurrentStepId)
-        GetOrCreateWipLocked(MySqlConnection cn, MySqlTransaction tx,
+        GetOrCreateWipLocked(
+            MySqlConnection cn, MySqlTransaction tx,
             uint workOrderId, uint activeRouteId)
     {
         using (var q = new MySqlCommand(@"
@@ -412,13 +489,14 @@ public class ScanApiService
 
         uint step1Id;
         using (var s1 = new MySqlCommand(@"
-            SELECT id FROM route_step
+            SELECT id
+            FROM route_step
             WHERE route_id=@r AND step_number=1
             LIMIT 1", cn, tx))
         {
             s1.Parameters.AddWithValue("@r", activeRouteId);
-            step1Id = Convert.ToUInt32(s1.ExecuteScalar()
-                ?? throw new Exception("Ruta sin step 1"));
+            step1Id = Convert.ToUInt32(
+                s1.ExecuteScalar() ?? throw new Exception("Ruta sin step 1"));
         }
 
         using (var ins = new MySqlCommand(@"
@@ -435,7 +513,8 @@ public class ScanApiService
     }
 
     private static (uint StepNumber, uint LocationId)? GetStepMetaLocked(
-        MySqlConnection cn, MySqlTransaction tx, uint routeId, uint stepId)
+        MySqlConnection cn, MySqlTransaction tx,
+        uint routeId, uint stepId)
     {
         using var cmd = new MySqlCommand(@"
             SELECT step_number, location_id
@@ -454,7 +533,8 @@ public class ScanApiService
     }
 
     private static (uint NextStepId, uint NextLocationId)? GetNextStepMeta(
-        MySqlConnection cn, MySqlTransaction tx, uint routeId, uint stepNumber)
+        MySqlConnection cn, MySqlTransaction tx,
+        uint routeId, uint stepNumber)
     {
         using var cmd = new MySqlCommand(@"
             SELECT id, location_id
@@ -544,6 +624,280 @@ public class ScanApiService
         cmd.Parameters.AddWithValue("@type", scanType);
         cmd.ExecuteNonQuery();
     }
+
+    public WipCancelResponse CancelWip(
+    uint userId,
+    uint deviceId,
+    string lot,
+    string partNumber,
+    string? reason)
+    {
+        using var cn = new MySqlConnection(_conn);
+        cn.Open();
+        using var tx = cn.BeginTransaction();
+
+        try
+        {
+            // Device válido
+            var devLoc = GetDeviceLocation(cn, tx, deviceId);
+            if (devLoc == null)
+            {
+                tx.Commit();
+                return new WipCancelResponse
+                {
+                    Ok = false,
+                    Reason = "DEVICE_INVALID"
+                };
+            }
+
+            // Producto
+            var productId = GetProductId(cn, tx, partNumber);
+            if (productId == null)
+            {
+                tx.Commit();
+                return new WipCancelResponse
+                {
+                    Ok = false,
+                    Reason = "PRODUCT_NOT_FOUND"
+                };
+            }
+
+            // Work order por lote
+            uint workOrderId;
+            using (var q = new MySqlCommand(
+                "SELECT id FROM work_order WHERE wo_number=@wo LIMIT 1", cn, tx))
+            {
+                q.Parameters.AddWithValue("@wo", lot);
+                var obj = q.ExecuteScalar();
+                if (obj == null)
+                {
+                    tx.Commit();
+                    return new WipCancelResponse
+                    {
+                        Ok = false,
+                        Reason = "WO_NOT_FOUND"
+                    };
+                }
+                workOrderId = Convert.ToUInt32(obj);
+            }
+
+            // WIP
+            uint wipItemId;
+            string status;
+            uint currentStepId;
+
+            using (var q = new MySqlCommand(@"
+            SELECT id, status, current_step_id
+            FROM wip_item
+            WHERE wo_order_id=@wo
+            LIMIT 1
+            FOR UPDATE", cn, tx))
+            {
+                q.Parameters.AddWithValue("@wo", workOrderId);
+                using var rd = q.ExecuteReader();
+                if (!rd.Read())
+                {
+                    tx.Commit();
+                    return new WipCancelResponse
+                    {
+                        Ok = false,
+                        Reason = "WIP_NOT_FOUND"
+                    };
+                }
+
+                wipItemId = rd.GetUInt32("id");
+                status = rd.GetString("status");
+                currentStepId = rd.GetUInt32("current_step_id");
+            }
+
+            if (status is "SCRAPPED" or "FINISHED")
+            {
+                tx.Commit();
+                return new WipCancelResponse
+                {
+                    Ok = false,
+                    Reason = "WIP_CLOSED"
+                };
+            }
+
+            // Marcar SCRAPPED
+            using (var up = new MySqlCommand(
+                "UPDATE wip_item SET status='SCRAPPED' WHERE id=@id", cn, tx))
+            {
+                up.Parameters.AddWithValue("@id", wipItemId);
+                up.ExecuteNonQuery();
+            }
+
+            // Evento MANUAL de cancelación
+            using (var ev = new MySqlCommand(@"
+            INSERT INTO scan_event (wip_item_id, route_step_id, scan_type, ts)
+            VALUES (@wip, @step, 'MANUAL', NOW())", cn, tx))
+            {
+                ev.Parameters.AddWithValue("@wip", wipItemId);
+                ev.Parameters.AddWithValue("@step", currentStepId);
+                ev.ExecuteNonQuery();
+            }
+
+            tx.Commit();
+            return new WipCancelResponse
+            {
+                Ok = true,
+                Status = "SCRAPPED"
+            };
+        }
+        catch
+        {
+            tx.Rollback();
+            throw;
+        }
+    }
+
+
+    public WipReworkResponse StartRework(
+    uint userId,
+    uint deviceId,
+    string lot,
+    string partNumber,
+    uint locationId,
+    uint qty,
+    string? reason)
+    {
+        using var cn = new MySqlConnection(_conn);
+        cn.Open();
+        using var tx = cn.BeginTransaction();
+
+        try
+        {
+            var productId = GetProductId(cn, tx, partNumber);
+            if (productId == null)
+            {
+                tx.Commit();
+                return new WipReworkResponse { Ok = false, Reason = "PRODUCT_NOT_FOUND" };
+            }
+
+            uint workOrderId;
+            using (var q = new MySqlCommand(
+                "SELECT id FROM work_order WHERE wo_number=@wo LIMIT 1", cn, tx))
+            {
+                q.Parameters.AddWithValue("@wo", lot);
+                var obj = q.ExecuteScalar();
+                if (obj == null)
+                {
+                    tx.Commit();
+                    return new WipReworkResponse { Ok = false, Reason = "WO_NOT_FOUND" };
+                }
+                workOrderId = Convert.ToUInt32(obj);
+            }
+
+            uint wipItemId;
+            string status;
+
+            using (var q = new MySqlCommand(@"
+            SELECT id, status
+            FROM wip_item
+            WHERE wo_order_id=@wo
+            LIMIT 1
+            FOR UPDATE", cn, tx))
+            {
+                q.Parameters.AddWithValue("@wo", workOrderId);
+                using var rd = q.ExecuteReader();
+                if (!rd.Read())
+                {
+                    tx.Commit();
+                    return new WipReworkResponse { Ok = false, Reason = "WIP_NOT_FOUND" };
+                }
+
+                wipItemId = rd.GetUInt32("id");
+                status = rd.GetString("status");
+            }
+
+            if (status is "SCRAPPED" or "FINISHED")
+            {
+                tx.Commit();
+                return new WipReworkResponse { Ok = false, Reason = "WIP_CLOSED" };
+            }
+
+            using (var ins = new MySqlCommand(@"
+            INSERT INTO wip_rework_log
+                (wip_item_id, location_id, user_id, device_id, qty, reason, created_at)
+            VALUES (@wip, @loc, @user, @dev, @qty, @reason, NOW())", cn, tx))
+            {
+                ins.Parameters.AddWithValue("@wip", wipItemId);
+                ins.Parameters.AddWithValue("@loc", locationId);
+                ins.Parameters.AddWithValue("@user", userId);
+                ins.Parameters.AddWithValue("@dev", deviceId);
+                ins.Parameters.AddWithValue("@qty", qty);
+                ins.Parameters.AddWithValue("@reason", reason);
+                ins.ExecuteNonQuery();
+            }
+
+            using (var up = new MySqlCommand(
+                "UPDATE wip_item SET status='HOLD' WHERE id=@id", cn, tx))
+            {
+                up.Parameters.AddWithValue("@id", wipItemId);
+                up.ExecuteNonQuery();
+            }
+
+            tx.Commit();
+            return new WipReworkResponse
+            {
+                Ok = true,
+                Status = "HOLD"
+            };
+        }
+        catch
+        {
+            tx.Rollback();
+            throw;
+        }
+    }
+
+    public WipReworkResponse ReleaseRework(string lot, string partNumber)
+    {
+        using var cn = new MySqlConnection(_conn);
+        cn.Open();
+        using var tx = cn.BeginTransaction();
+
+        try
+        {
+            uint workOrderId;
+            using (var q = new MySqlCommand(
+                "SELECT id FROM work_order WHERE wo_number=@wo LIMIT 1", cn, tx))
+            {
+                q.Parameters.AddWithValue("@wo", lot);
+                var obj = q.ExecuteScalar();
+                if (obj == null)
+                {
+                    tx.Commit();
+                    return new WipReworkResponse { Ok = false, Reason = "WO_NOT_FOUND" };
+                }
+                workOrderId = Convert.ToUInt32(obj);
+            }
+
+            using (var up = new MySqlCommand(@"
+            UPDATE wip_item
+            SET status='ACTIVE'
+            WHERE wo_order_id=@wo AND status='HOLD'", cn, tx))
+            {
+                up.Parameters.AddWithValue("@wo", workOrderId);
+                up.ExecuteNonQuery();
+            }
+
+            tx.Commit();
+            return new WipReworkResponse
+            {
+                Ok = true,
+                Status = "ACTIVE"
+            };
+        }
+        catch
+        {
+            tx.Rollback();
+            throw;
+        }
+    }
+
+
 }
 
 // =========================================================

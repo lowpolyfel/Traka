@@ -7,29 +7,31 @@ namespace Trackii.Controllers.Api;
 
 [ApiController]
 [Route("api/v1/device")]
-[Authorize(AuthenticationSchemes = "ApiBearer")]
-public class DeviceApiController : ControllerBase
+[AllowAnonymous]
+public class DeviceActivationApiController : ControllerBase
 {
-    private readonly DeviceApiService _svc;
+    private readonly DeviceActivationApiService _svc;
 
-    public DeviceApiController(DeviceApiService svc)
+    public DeviceActivationApiController(DeviceActivationApiService svc)
     {
         _svc = svc;
     }
 
-    [HttpPost("bind")]
-    public ActionResult<DeviceBindResponse> Bind([FromBody] DeviceBindRequest req)
+    [HttpPost("activate")]
+    public ActionResult<DeviceActivationResponse> Activate(
+        [FromBody] DeviceActivationRequest req)
     {
-        if (string.IsNullOrWhiteSpace(req.DeviceUid))
-            return BadRequest("deviceUid requerido.");
+        if (string.IsNullOrWhiteSpace(req.Token))
+            return BadRequest("token requerido");
 
-        var (deviceId, locId, locName) = _svc.Bind(req.DeviceUid.Trim(), req.LocationId);
+        if (string.IsNullOrWhiteSpace(req.AndroidId))
+            return BadRequest("androidId requerido");
 
-        return Ok(new DeviceBindResponse
-        {
-            DeviceId = deviceId,
-            LocationId = locId,
-            LocationName = locName
-        });
+        var result = _svc.Activate(req.Token.Trim(), req.AndroidId.Trim());
+
+        if (!result.Ok)
+            return Unauthorized(result.Reason);
+
+        return Ok(result);
     }
 }

@@ -1,4 +1,5 @@
 ﻿using System.Security.Claims;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Trackii.Models.Api;
@@ -21,20 +22,29 @@ public class ScanApiController : ControllerBase
     [HttpPost("scan")]
     public ActionResult<ScanResponse> Scan([FromBody] ScanRequest req)
     {
-        // 🔒 DEFINITIVO: barcode obligatorio
-        if (string.IsNullOrWhiteSpace(req.Barcode))
-            return BadRequest("barcode requerido.");
+        if (req.DeviceId == 0)
+            return BadRequest("deviceId requerido");
+
+        if (string.IsNullOrWhiteSpace(req.Lot))
+            return BadRequest("lot requerido");
+
+        if (!Regex.IsMatch(req.Lot, @"^\d{7}$"))
+            return BadRequest("lot invalido");
+
+        if (string.IsNullOrWhiteSpace(req.PartNumber))
+            return BadRequest("partNumber requerido");
 
         var uid = User.FindFirstValue("uid");
         if (string.IsNullOrWhiteSpace(uid) || !uint.TryParse(uid, out var userId))
-            return Unauthorized("Token sin uid.");
+            return Unauthorized("Token sin uid");
 
-        // 🔒 El WO SIEMPRE sale del barcode
-        // Ej: WO-TEST-001-0001 → WO-TEST-001
-        var parts = req.Barcode.Split('-', StringSplitOptions.RemoveEmptyEntries);
-        var woNumber = parts[0];
-
-        var r = _scan.Scan(userId, req.DeviceId, woNumber, req.Qty);
+        var r = _scan.Scan(
+            userId,
+            req.DeviceId,
+            req.Lot.Trim(),
+            req.PartNumber.Trim(),
+            req.Qty
+        );
 
         return Ok(new ScanResponse
         {
