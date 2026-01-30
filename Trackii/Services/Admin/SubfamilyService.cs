@@ -196,12 +196,14 @@ public class SubfamilyService
         cmd.ExecuteNonQuery();
     }
 
-    // ===================== SET ACTIVE (Con Cascada) =====================
+    // ==========================================
+    // SET ACTIVE (Cascada Bidireccional)
+    // ==========================================
     public bool SetActive(uint id, bool active)
     {
         using var cn = new MySqlConnection(_conn);
         cn.Open();
-        using var tx = cn.BeginTransaction(); // Transacción para cascada
+        using var tx = cn.BeginTransaction();
 
         if (active)
         {
@@ -218,28 +220,8 @@ public class SubfamilyService
             if (parentActive == null || !Convert.ToBoolean(parentActive))
                 return false; // Padre inactivo
         }
-        else
-        {
-            // CASCADA: Desactivar Productos y Rutas
 
-            // 1. Apagar Productos
-            using (var offProd = new MySqlCommand(
-                "UPDATE product SET active = 0 WHERE id_subfamily = @id", cn, tx))
-            {
-                offProd.Parameters.AddWithValue("@id", id);
-                offProd.ExecuteNonQuery();
-            }
-
-            // 2. Apagar Rutas
-            using (var offRoutes = new MySqlCommand(
-                "UPDATE route SET active = 0 WHERE subfamily_id = @id", cn, tx))
-            {
-                offRoutes.Parameters.AddWithValue("@id", id);
-                offRoutes.ExecuteNonQuery();
-            }
-        }
-
-        // Actualizar la Subfamilia
+        // 1. Actualizar la Subfamilia
         using var cmd = new MySqlCommand(
             "UPDATE subfamily SET active=@a WHERE id=@id", cn, tx);
 
@@ -247,10 +229,30 @@ public class SubfamilyService
         cmd.Parameters.AddWithValue("@a", active);
         cmd.ExecuteNonQuery();
 
+        // 2. CASCADA: Productos y Rutas
+        var val = active ? 1 : 0;
+
+        // A. Actualizar Productos
+        using (var offProd = new MySqlCommand(
+            "UPDATE product SET active = @val WHERE id_subfamily = @id", cn, tx))
+        {
+            offProd.Parameters.AddWithValue("@val", val);
+            offProd.Parameters.AddWithValue("@id", id);
+            offProd.ExecuteNonQuery();
+        }
+
+        // B. Actualizar Rutas
+        using (var offRoutes = new MySqlCommand(
+            "UPDATE route SET active = @val WHERE subfamily_id = @id", cn, tx))
+        {
+            offRoutes.Parameters.AddWithValue("@val", val);
+            offRoutes.Parameters.AddWithValue("@id", id);
+            offRoutes.ExecuteNonQuery();
+        }
+
         tx.Commit();
         return true;
     }
-
     public bool Exists(string name, uint? id = null)
     {
         using var cn = new MySqlConnection(_conn);

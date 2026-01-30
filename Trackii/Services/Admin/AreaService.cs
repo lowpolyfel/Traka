@@ -126,12 +126,16 @@ public class AreaService
     }
 
     // CASCADA: Si desactivas el área, se apagan familias, subfamilias y productos
+    // ==========================================
+    // SET ACTIVE (Cascada Bidireccional)
+    // ==========================================
     public void SetActive(uint id, bool active)
     {
         using var cn = new MySqlConnection(_conn);
         cn.Open();
         using var tx = cn.BeginTransaction();
 
+        // 1. Actualizar el Área
         using (var cmd = new MySqlCommand(
             "UPDATE area SET active = @a WHERE id = @id", cn, tx))
         {
@@ -140,37 +144,54 @@ public class AreaService
             cmd.ExecuteNonQuery();
         }
 
-        if (!active)
+        // 2. CASCADA: Aplicar el mismo estado (1 o 0) a toda la descendencia
+        var val = active ? 1 : 0;
+
+        // A. Actualizar Familias
+        using (var cmd = new MySqlCommand(
+            "UPDATE family SET active = @val WHERE id_area = @id", cn, tx))
         {
-            // Apagar Familias
-            using (var cmd = new MySqlCommand("UPDATE family SET active = 0 WHERE id_area = @id", cn, tx))
-            {
-                cmd.Parameters.AddWithValue("@id", id);
-                cmd.ExecuteNonQuery();
-            }
+            cmd.Parameters.AddWithValue("@val", val);
+            cmd.Parameters.AddWithValue("@id", id);
+            cmd.ExecuteNonQuery();
+        }
 
-            // Apagar Subfamilias
-            using (var cmd = new MySqlCommand(@"
-                UPDATE subfamily s 
-                JOIN family f ON f.id = s.id_family 
-                SET s.active = 0 
-                WHERE f.id_area = @id", cn, tx))
-            {
-                cmd.Parameters.AddWithValue("@id", id);
-                cmd.ExecuteNonQuery();
-            }
+        // B. Actualizar Subfamilias (Join con Family)
+        using (var cmd = new MySqlCommand(@"
+            UPDATE subfamily s 
+            JOIN family f ON f.id = s.id_family 
+            SET s.active = @val 
+            WHERE f.id_area = @id", cn, tx))
+        {
+            cmd.Parameters.AddWithValue("@val", val);
+            cmd.Parameters.AddWithValue("@id", id);
+            cmd.ExecuteNonQuery();
+        }
 
-            // Apagar Productos
-            using (var cmd = new MySqlCommand(@"
-                UPDATE product p
-                JOIN subfamily s ON s.id = p.id_subfamily
-                JOIN family f ON f.id = s.id_family
-                SET p.active = 0
-                WHERE f.id_area = @id", cn, tx))
-            {
-                cmd.Parameters.AddWithValue("@id", id);
-                cmd.ExecuteNonQuery();
-            }
+        // C. Actualizar Productos (Join con Family -> Subfamily)
+        using (var cmd = new MySqlCommand(@"
+            UPDATE product p
+            JOIN subfamily s ON s.id = p.id_subfamily
+            JOIN family f ON f.id = s.id_family
+            SET p.active = @val
+            WHERE f.id_area = @id", cn, tx))
+        {
+            cmd.Parameters.AddWithValue("@val", val);
+            cmd.Parameters.AddWithValue("@id", id);
+            cmd.ExecuteNonQuery();
+        }
+
+        // D. Actualizar Rutas (Agregado para consistencia completa)
+        using (var cmd = new MySqlCommand(@"
+            UPDATE route r
+            JOIN subfamily s ON s.id = r.subfamily_id
+            JOIN family f ON f.id = s.id_family
+            SET r.active = @val
+            WHERE f.id_area = @id", cn, tx))
+        {
+            cmd.Parameters.AddWithValue("@val", val);
+            cmd.Parameters.AddWithValue("@id", id);
+            cmd.ExecuteNonQuery();
         }
 
         tx.Commit();

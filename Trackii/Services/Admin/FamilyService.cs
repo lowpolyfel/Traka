@@ -188,17 +188,17 @@ public class FamilyService
     }
 
     // ==========================================
-    // SET ACTIVE (Cascada)
+    // SET ACTIVE (Cascada Bidireccional)
     // ==========================================
     public bool SetActive(uint id, bool active)
     {
         using var cn = new MySqlConnection(_conn);
         cn.Open();
-        using var tx = cn.BeginTransaction(); // Necesario para la cascada
+        using var tx = cn.BeginTransaction();
 
         if (active)
         {
-            // VALIDACIÓN: Verificar que el Área padre esté activa antes de activar la familia
+            // VALIDACIÓN: Solo verificamos al padre (Área) si intentamos ACTIVAR
             using var check = new MySqlCommand(@"
                 SELECT a.active
                 FROM family f
@@ -211,46 +211,48 @@ public class FamilyService
 
             if (!areaActive) return false; // El padre está inactivo, abortamos
         }
-        else
-        {
-            // CASCADA: Si desactivamos, apagar descendencia (Subfamilias, Productos, Rutas)
 
-            // 1. Apagar Subfamilias
-            using (var cmd = new MySqlCommand(
-                "UPDATE subfamily SET active = 0 WHERE id_family = @id", cn, tx))
-            {
-                cmd.Parameters.AddWithValue("@id", id);
-                cmd.ExecuteNonQuery();
-            }
-
-            // 2. Apagar Productos (Join Subfamily)
-            using (var cmd = new MySqlCommand(@"
-                UPDATE product p 
-                JOIN subfamily s ON s.id = p.id_subfamily 
-                SET p.active = 0 
-                WHERE s.id_family = @id", cn, tx))
-            {
-                cmd.Parameters.AddWithValue("@id", id);
-                cmd.ExecuteNonQuery();
-            }
-
-            // 3. Apagar Rutas (Join Subfamily)
-            using (var cmd = new MySqlCommand(@"
-                UPDATE route r 
-                JOIN subfamily s ON s.id = r.subfamily_id 
-                SET r.active = 0 
-                WHERE s.id_family = @id", cn, tx))
-            {
-                cmd.Parameters.AddWithValue("@id", id);
-                cmd.ExecuteNonQuery();
-            }
-        }
-
-        // Finalmente actualizamos la Familia
+        // 1. Actualizar la Familia
         using (var cmd = new MySqlCommand(
             "UPDATE family SET active = @a WHERE id = @id", cn, tx))
         {
             cmd.Parameters.AddWithValue("@a", active);
+            cmd.Parameters.AddWithValue("@id", id);
+            cmd.ExecuteNonQuery();
+        }
+
+        // 2. CASCADA: Aplicar estado a hijos (Subfamilias, Productos, Rutas)
+        var val = active ? 1 : 0;
+
+        // A. Actualizar Subfamilias
+        using (var cmd = new MySqlCommand(
+            "UPDATE subfamily SET active = @val WHERE id_family = @id", cn, tx))
+        {
+            cmd.Parameters.AddWithValue("@val", val);
+            cmd.Parameters.AddWithValue("@id", id);
+            cmd.ExecuteNonQuery();
+        }
+
+        // B. Actualizar Productos
+        using (var cmd = new MySqlCommand(@"
+            UPDATE product p 
+            JOIN subfamily s ON s.id = p.id_subfamily 
+            SET p.active = @val 
+            WHERE s.id_family = @id", cn, tx))
+        {
+            cmd.Parameters.AddWithValue("@val", val);
+            cmd.Parameters.AddWithValue("@id", id);
+            cmd.ExecuteNonQuery();
+        }
+
+        // C. Actualizar Rutas
+        using (var cmd = new MySqlCommand(@"
+            UPDATE route r 
+            JOIN subfamily s ON s.id = r.subfamily_id 
+            SET r.active = @val 
+            WHERE s.id_family = @id", cn, tx))
+        {
+            cmd.Parameters.AddWithValue("@val", val);
             cmd.Parameters.AddWithValue("@id", id);
             cmd.ExecuteNonQuery();
         }
